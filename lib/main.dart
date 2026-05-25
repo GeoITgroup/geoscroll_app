@@ -6,10 +6,10 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:convert';
+import 'dart:async';
 
 const String BASE_URL = 'http://178.104.196.214:5005';
 
-// ==================== VELOCAR COLORS ====================
 const kGreen = Color(0xFF2E9E6B);
 const kGreenLight = Color(0xFF4CAF80);
 const kOrange = Color(0xFFF07C2A);
@@ -38,7 +38,6 @@ class VelocarApp extends StatelessWidget {
   }
 }
 
-// ==================== HELPERS ====================
 Future<Map<String, String>> _authHeaders() async {
   final prefs = await SharedPreferences.getInstance();
   final token = prefs.getString('session_token') ?? '';
@@ -66,10 +65,19 @@ class _SplashScreenState extends State<SplashScreen> {
     await Future.delayed(const Duration(seconds: 2));
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('session_token');
+    // შევამოწმოთ აქტიური trip არის თუ არა
+    final tripId = prefs.getInt('active_trip_id');
+    final deviceId = prefs.getString('active_device_id');
     if (mounted) {
-      Navigator.pushReplacement(context, MaterialPageRoute(
-        builder: (_) => token != null && token.isNotEmpty ? const MainScreen() : const LoginScreen(),
-      ));
+      if (tripId != null && deviceId != null) {
+        Navigator.pushReplacement(context, MaterialPageRoute(
+          builder: (_) => ActiveRideScreen(tripId: tripId, deviceId: deviceId),
+        ));
+      } else if (token != null && token.isNotEmpty) {
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MainScreen()));
+      } else {
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
+      }
     }
   }
 
@@ -130,6 +138,7 @@ class _LoginScreenState extends State<LoginScreen> {
         await prefs.setString('session_token', data['token'] ?? '');
         await prefs.setString('username', data['user']?['username'] ?? _userCtrl.text);
         await prefs.setString('role', data['user']?['role'] ?? 'client');
+        await prefs.setInt('user_id', data['user']?['id'] ?? 1);
         if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MainScreen()));
       } else {
         setState(() { _error = data['error'] ?? 'შეცდომა'; });
@@ -222,7 +231,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
-// ==================== MAIN SCREEN (რუკა + ქვედა ნავიგაცია) ====================
+// ==================== MAIN SCREEN ====================
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
   @override
@@ -274,13 +283,14 @@ class MapHomeScreen extends StatefulWidget {
 
 class _MapHomeScreenState extends State<MapHomeScreen> {
   List _scooters = [];
-  LatLng _center = const LatLng(41.6938, 44.8015); // თბილისი
+  List _geofences = [];
+  LatLng _center = const LatLng(41.6938, 44.8015);
   final MapController _mapController = MapController();
 
   @override
   void initState() {
     super.initState();
-    _loadScooters();
+    _loadData();
     _getLocation();
   }
 
@@ -299,13 +309,46 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
     } catch (_) {}
   }
 
-  Future<void> _loadScooters() async {
+  Future<void> _loadData() async {
     try {
       final headers = await _authHeaders();
-      final res = await http.get(Uri.parse('$BASE_URL/api/scooters'), headers: headers);
-      final data = jsonDecode(res.body);
-      if (data is List) setState(() => _scooters = data);
+      // სქროლები
+      final res1 = await http.get(Uri.parse('$BASE_URL/api/scooters'), headers: headers);
+      final data1 = jsonDecode(res1.body);
+      if (data1 is List) setState(() => _scooters = data1);
+
+      // გეოზონები
+      final res2 = await http.get(Uri.parse('$BASE_URL/api/geofences'), headers: headers);
+      final data2 = jsonDecode(res2.body);
+      if (data2 is List) setState(() => _geofences = data2);
     } catch (_) {}
+  }
+
+  // გეოზონის polygon წერტილები
+  List<LatLng> _parseGeofence(dynamic geofence) {
+    try {
+      if (geofence['coordinates'] != null) {
+        final coords = jsonDecode(geofence['coordinates'].toString());
+        if (coords is List) {
+          return coords.map<LatLng>((c) => LatLng(
+            double.parse(c[1].toString()),
+            double.parse(c[0].toString()),
+          )).toList();
+        }
+      }
+      // Default — თბილისის ზონა
+      final lat = double.tryParse(geofence['latitude']?.toString() ?? '') ?? 41.6938;
+      final lng = double.tryParse(geofence['longitude']?.toString() ?? '') ?? 44.8015;
+      final r = 0.01;
+      return [
+        LatLng(lat + r, lng - r),
+        LatLng(lat + r, lng + r),
+        LatLng(lat - r, lng + r),
+        LatLng(lat - r, lng - r),
+      ];
+    } catch (_) {
+      return [];
+    }
   }
 
   @override
@@ -313,7 +356,6 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          // რუკა
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(initialCenter: _center, initialZoom: 14),
@@ -322,23 +364,45 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.velocar.app',
               ),
+              // გეოზონები
+              PolygonLayer(
+                polygons: _geofences.map((g) {
+                  final points = _parseGeofence(g);
+                  if (points.isEmpty) return null;
+                  return Polygon(
+                    points: points,
+                    color: kGreen.withOpacity(0.15),
+                    borderColor: kGreen,
+                    borderStrokeWidth: 2,
+                  );
+                }).whereType<Polygon>().toList(),
+              ),
+              // სქროლების მარკერები
               MarkerLayer(
-                markers: _scooters.where((s) => s['latitude'] != null && s['longitude'] != null).map((s) {
+                markers: _scooters
+                    .where((s) => s['latitude'] != null && s['longitude'] != null)
+                    .map((s) {
                   final available = s['status'] == 'available';
                   return Marker(
-                    point: LatLng(double.parse(s['latitude'].toString()), double.parse(s['longitude'].toString())),
-                    width: 48, height: 48,
+                    point: LatLng(
+                      double.parse(s['latitude'].toString()),
+                      double.parse(s['longitude'].toString()),
+                    ),
+                    width: 56, height: 56,
                     child: GestureDetector(
-                      onTap: () => Navigator.push(context, MaterialPageRoute(
-                        builder: (_) => ScooterDetailScreen(deviceId: s['device_id']),
-                      )),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: available ? kGreen : Colors.grey,
-                          shape: BoxShape.circle,
-                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 6)],
-                        ),
-                        child: const Icon(Icons.electric_scooter, color: Colors.white, size: 26),
+                      onTap: () => _showScooterInfo(context, s),
+                      child: Column(
+                        children: [
+                          Container(
+                            width: 44, height: 44,
+                            decoration: BoxDecoration(
+                              color: available ? kGreen : Colors.grey,
+                              shape: BoxShape.circle,
+                              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 8, offset: const Offset(0, 3))],
+                            ),
+                            child: const Icon(Icons.electric_scooter, color: Colors.white, size: 24),
+                          ),
+                        ],
                       ),
                     ),
                   );
@@ -347,7 +411,7 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
             ],
           ),
 
-          // ზედა header
+          // Header
           Positioned(
             top: 0, left: 0, right: 0,
             child: Container(
@@ -366,7 +430,7 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
                     decoration: BoxDecoration(color: Colors.white.withOpacity(0.15), borderRadius: BorderRadius.circular(10)),
                     child: IconButton(
                       icon: const Icon(Icons.refresh, color: Colors.white, size: 20),
-                      onPressed: _loadScooters,
+                      onPressed: _loadData,
                     ),
                   ),
                 ],
@@ -374,12 +438,11 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
             ),
           ),
 
-          // ქვედა — სკანირების ღილაკი
+          // ქვედა ღილაკები
           Positioned(
             bottom: 20, left: 20, right: 20,
             child: Column(
               children: [
-                // სქროლების რაოდენობა
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   decoration: BoxDecoration(
@@ -400,7 +463,6 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                // სკანირების ღილაკი
                 SizedBox(
                   width: double.infinity, height: 58,
                   child: ElevatedButton.icon(
@@ -418,6 +480,104 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showScooterInfo(BuildContext context, Map s) {
+    final available = s['status'] == 'available';
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 16),
+            Row(children: [
+              Container(
+                width: 56, height: 56,
+                decoration: BoxDecoration(
+                  color: available ? kGreen.withOpacity(0.1) : Colors.grey.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.electric_scooter, color: available ? kGreen : Colors.grey, size: 30),
+              ),
+              const SizedBox(width: 16),
+              Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(s['device_id'] ?? '—', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kDark)),
+                  Text(s['company_name'] ?? '—', style: TextStyle(color: Colors.grey[600])),
+                ],
+              )),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: available ? kGreen.withOpacity(0.1) : Colors.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  available ? 'ხელმისაწვდომი' : 'დაკავებული',
+                  style: TextStyle(color: available ? kGreen : Colors.red, fontWeight: FontWeight.w600, fontSize: 12),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 16),
+            Row(children: [
+              _infoChip(Icons.battery_charging_full, '${s['battery'] ?? 0}%', kGreen),
+              const SizedBox(width: 8),
+              _infoChip(Icons.location_on, s['zone_name'] ?? 'ზონა', kOrange),
+              const SizedBox(width: 8),
+              _infoChip(Icons.attach_money, '₾0.15/წთ', kDark),
+            ]),
+            const SizedBox(height: 20),
+            if (available)
+              SizedBox(
+                width: double.infinity, height: 52,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.qr_code_scanner, color: Colors.white),
+                  label: const Text('QR სკანირება', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kGreen,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const QRScanScreen()));
+                  },
+                ),
+              )
+            else
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: Colors.red.withOpacity(0.08), borderRadius: BorderRadius.circular(12)),
+                child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Icon(Icons.block, color: Colors.red, size: 18),
+                  SizedBox(width: 8),
+                  Text('სქროლი ამჟამად დაკავებულია', style: TextStyle(color: Colors.red)),
+                ]),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _infoChip(IconData icon, String text, Color color) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(color: color.withOpacity(0.08), borderRadius: BorderRadius.circular(10)),
+        child: Column(children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(height: 4),
+          Text(text, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+        ]),
       ),
     );
   }
@@ -450,38 +610,53 @@ class _QRScanScreenState extends State<QRScanScreen> {
       body: Stack(
         children: [
           MobileScanner(onDetect: _onDetect),
-          // ბნელი overlay
-          Container(color: Colors.black.withOpacity(0.4)),
-          // ჩარჩო
+          Container(color: Colors.black.withOpacity(0.5)),
           Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text('სქროლის QR კოდი', style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 16)),
-                const SizedBox(height: 24),
-                Container(
-                  width: 240, height: 240,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: kGreen, width: 3),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(17),
-                    child: MobileScanner(onDetect: _onDetect),
-                  ),
+                Text('სქროლის QR კოდი', style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 18, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 8),
+                Text('სქროლთან მიახლოვდი და დაასკანირე', style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13)),
+                const SizedBox(height: 32),
+                Stack(
+                  children: [
+                    Container(
+                      width: 240, height: 240,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: kGreen, width: 3),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                    ),
+                    Positioned(top: 3, left: 3, right: 3, bottom: 3,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(17),
+                        child: MobileScanner(onDetect: _onDetect),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 24),
-                Text('QR კოდი მოათავსე ჩარჩოში', style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 13)),
+                const SizedBox(height: 32),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.qr_code, color: Colors.white54, size: 16),
+                    const SizedBox(width: 6),
+                    Text('QR კოდი მოათავსე ჩარჩოში', style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 13)),
+                  ]),
+                ),
               ],
             ),
           ),
-          // დახურვის ღილაკი
           Positioned(
-            top: MediaQuery.of(context).padding.top + 8,
-            left: 16,
-            child: IconButton(
-              icon: const Icon(Icons.close, color: Colors.white, size: 28),
-              onPressed: () => Navigator.pop(context),
+            top: MediaQuery.of(context).padding.top + 8, left: 16,
+            child: Container(
+              decoration: BoxDecoration(color: Colors.white.withOpacity(0.15), shape: BoxShape.circle),
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white, size: 24),
+                onPressed: () => Navigator.pop(context),
+              ),
             ),
           ),
         ],
@@ -501,6 +676,7 @@ class ScooterDetailScreen extends StatefulWidget {
 class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
   Map<String, dynamic>? _scooter;
   bool _loading = true;
+  bool _starting = false;
 
   @override
   void initState() {
@@ -522,6 +698,37 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
     } catch (_) {
       setState(() => _loading = false);
     }
+  }
+
+  Future<void> _startRide() async {
+    setState(() => _starting = true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getInt('user_id') ?? 1;
+      final headers = await _authHeaders();
+      final res = await http.post(
+        Uri.parse('$BASE_URL/api/trips/start'),
+        headers: headers,
+        body: jsonEncode({'device_id': widget.deviceId, 'user_id': userId}),
+      );
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        await prefs.setInt('active_trip_id', data['trip_id']);
+        await prefs.setString('active_device_id', widget.deviceId);
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (_) => ActiveRideScreen(tripId: data['trip_id'], deviceId: widget.deviceId)),
+            (_) => false,
+          );
+        }
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(data['error'] ?? 'შეცდომა')));
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('სერვერთან კავშირის შეცდომა')));
+    }
+    setState(() => _starting = false);
   }
 
   @override
@@ -575,25 +782,27 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
                   _infoRow(Icons.business, 'კომპანია', _scooter!['company_name'] ?? '—'),
                   _infoRow(Icons.battery_charging_full, 'ბატარეა', '${_scooter!['battery'] ?? 0}%'),
                   _infoRow(Icons.location_on, 'ზონა', _scooter!['zone_name'] ?? '—'),
-                  _infoRow(Icons.attach_money, 'ფასი', '₾0.15 / წუთი'),
+                  _infoRow(Icons.attach_money, 'ტარიფი', '₾0.15 / წუთი'),
                 ],
               ),
             ),
             const SizedBox(height: 20),
-            if (available) ...[
+            if (available)
               SizedBox(
                 width: double.infinity, height: 56,
                 child: ElevatedButton.icon(
-                  icon: const Icon(Icons.credit_card, color: Colors.white),
-                  label: const Text('გაქირავება / გადახდა', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                  icon: _starting
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Icon(Icons.lock_open, color: Colors.white),
+                  label: Text(_starting ? 'სქროლი იხსნება...' : 'გაქირავების დაწყება', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: kGreen,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
-                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PaymentScreen(scooter: _scooter!))),
+                  onPressed: _starting ? null : _startRide,
                 ),
-              ),
-            ] else
+              )
+            else
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(color: Colors.red.withOpacity(0.08), borderRadius: BorderRadius.circular(14)),
@@ -623,6 +832,194 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
           const Spacer(),
           Text(value, style: const TextStyle(fontWeight: FontWeight.w600, color: kDark)),
         ],
+      ),
+    );
+  }
+}
+
+// ==================== ACTIVE RIDE ====================
+class ActiveRideScreen extends StatefulWidget {
+  final int tripId;
+  final String deviceId;
+  const ActiveRideScreen({super.key, required this.tripId, required this.deviceId});
+  @override
+  State<ActiveRideScreen> createState() => _ActiveRideScreenState();
+}
+
+class _ActiveRideScreenState extends State<ActiveRideScreen> {
+  int _seconds = 0;
+  Timer? _timer;
+  bool _ending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      setState(() => _seconds++);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  String get _timeStr {
+    final m = _seconds ~/ 60;
+    final s = _seconds % 60;
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  double get _cost => (_seconds / 60) * 0.15;
+
+  Future<void> _endRide() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('გაქირავების დასრულება'),
+        content: Text('დრო: $_timeStr\nღირებულება: ₾${_cost.toStringAsFixed(2)}\n\nდარწმუნებული ხარ?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('გაგრძელება')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('დასრულება', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() => _ending = true);
+    try {
+      final headers = await _authHeaders();
+      final res = await http.post(
+        Uri.parse('$BASE_URL/api/trips/end'),
+        headers: headers,
+        body: jsonEncode({'trip_id': widget.tripId, 'device_id': widget.deviceId}),
+      );
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('active_trip_id');
+        await prefs.remove('active_device_id');
+        _timer?.cancel();
+        if (mounted) {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: const Row(children: [Icon(Icons.check_circle, color: kGreen), SizedBox(width: 8), Text('გაქირავება დასრულდა')]),
+              content: Text('დრო: ${data['minutes']} წუთი\nგადახდილი: ₾${data['amount']}'),
+              actions: [
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const MainScreen()), (_) => false);
+                  },
+                  style: ElevatedButton.styleFrom(backgroundColor: kGreen),
+                  child: const Text('დახურვა', style: TextStyle(color: Colors.white)),
+                ),
+              ],
+            ),
+          );
+        }
+      }
+    } catch (_) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('შეცდომა — სცადე ახლიდან')));
+    }
+    setState(() => _ending = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: kDark,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            children: [
+              const SizedBox(height: 20),
+              // სქროლის ანიმაცია
+              Container(
+                width: 120, height: 120,
+                decoration: BoxDecoration(
+                  color: kGreen.withOpacity(0.15),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: kGreen, width: 2),
+                ),
+                child: const Icon(Icons.electric_scooter, size: 64, color: kGreen),
+              ),
+              const SizedBox(height: 24),
+              const Text('გაქირავება მიმდინარეობს', style: TextStyle(color: Colors.white70, fontSize: 16)),
+              const SizedBox(height: 8),
+              Text(widget.deviceId, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 40),
+
+              // ტაიმერი
+              Container(
+                padding: const EdgeInsets.all(28),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: Colors.white.withOpacity(0.1)),
+                ),
+                child: Column(
+                  children: [
+                    Text(_timeStr, style: const TextStyle(color: Colors.white, fontSize: 56, fontWeight: FontWeight.bold, letterSpacing: 4, fontFeatures: [FontFeature.tabularFigures()])),
+                    const SizedBox(height: 8),
+                    const Text('წუთი : წამი', style: TextStyle(color: Colors.white38, fontSize: 13)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              // ღირებულება
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: kGreen.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: kGreen.withOpacity(0.3)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('მიმდინარე ღირებულება', style: TextStyle(color: Colors.white70)),
+                    Text('₾${_cost.toStringAsFixed(2)}', style: const TextStyle(color: kGreen, fontSize: 24, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // ტარიფი
+              Text('₾0.15 / წუთი', style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 13)),
+
+              const Spacer(),
+
+              // დასრულების ღილაკი
+              SizedBox(
+                width: double.infinity, height: 58,
+                child: ElevatedButton.icon(
+                  icon: _ending
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Icon(Icons.stop_circle, color: Colors.white, size: 24),
+                  label: Text(_ending ? 'მუშავდება...' : 'გაქირავების დასრულება', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red[600],
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  onPressed: _ending ? null : _endRide,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -700,7 +1097,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            // სქროლის ინფო
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
@@ -717,8 +1113,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
               ),
             ),
             const SizedBox(height: 16),
-
-            // დროის არჩევა
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
@@ -746,7 +1140,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('სულ გადასახდელი:', style: TextStyle(fontWeight: FontWeight.w600, color: kDark)),
+                        const Text('სულ:', style: TextStyle(fontWeight: FontWeight.w600, color: kDark)),
                         Text('₾${_total.toStringAsFixed(2)}', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: kGreen)),
                       ],
                     ),
@@ -755,8 +1149,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
               ),
             ),
             const SizedBox(height: 16),
-
-            // ბარათი
             if (_savedCardLast4.isEmpty)
               GestureDetector(
                 onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CardScreen())),
@@ -767,14 +1159,12 @@ class _PaymentScreenState extends State<PaymentScreen> {
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: kOrange.withOpacity(0.3)),
                   ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.add_card, color: kOrange),
-                      SizedBox(width: 12),
-                      Expanded(child: Text('ბარათი მიაბი გადახდისთვის', style: TextStyle(color: kOrange, fontWeight: FontWeight.w600))),
-                      Icon(Icons.arrow_forward_ios, color: kOrange, size: 16),
-                    ],
-                  ),
+                  child: const Row(children: [
+                    Icon(Icons.add_card, color: kOrange),
+                    SizedBox(width: 12),
+                    Expanded(child: Text('ბარათი მიაბი გადახდისთვის', style: TextStyle(color: kOrange, fontWeight: FontWeight.w600))),
+                    Icon(Icons.arrow_forward_ios, color: kOrange, size: 16),
+                  ]),
                 ),
               )
             else
@@ -782,26 +1172,20 @@ class _PaymentScreenState extends State<PaymentScreen> {
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14),
                     boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8)]),
-                child: Row(
-                  children: [
-                    const Icon(Icons.credit_card, color: kGreen),
-                    const SizedBox(width: 12),
-                    Text('•••• •••• •••• $_savedCardLast4', style: const TextStyle(fontWeight: FontWeight.w600, color: kDark)),
-                    const Spacer(),
-                    const Icon(Icons.check_circle, color: kGreen, size: 20),
-                  ],
-                ),
+                child: Row(children: [
+                  const Icon(Icons.credit_card, color: kGreen),
+                  const SizedBox(width: 12),
+                  Text('•••• •••• •••• $_savedCardLast4', style: const TextStyle(fontWeight: FontWeight.w600, color: kDark)),
+                  const Spacer(),
+                  const Icon(Icons.check_circle, color: kGreen, size: 20),
+                ]),
               ),
             const SizedBox(height: 24),
-
             SizedBox(
               width: double.infinity, height: 56,
               child: ElevatedButton(
                 onPressed: _loading ? null : _pay,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: kGreen,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
+                style: ElevatedButton.styleFrom(backgroundColor: kGreen, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
                 child: _loading
                     ? const CircularProgressIndicator(color: Colors.white)
                     : Text('გადახდა ₾${_total.toStringAsFixed(2)}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.white)),
@@ -899,110 +1283,98 @@ class _CardScreenState extends State<CardScreen> {
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
-        child: _hasSaved ? Column(
-          children: [
-            // ბარათის ვიზუალი
-            Container(
-              height: 180,
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: [kDark, Color(0xFF2D4A38)], begin: Alignment.topLeft, end: Alignment.bottomRight),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                    const Text('Velocar Card', style: TextStyle(color: Colors.white70, fontSize: 13)),
-                    const Icon(Icons.credit_card, color: kGreen, size: 32),
-                  ]),
-                  const Spacer(),
-                  Text('•••• •••• •••• $_last4', style: const TextStyle(color: Colors.white, fontSize: 22, letterSpacing: 3, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  Text(_nameCtrl.text.isEmpty ? 'ბარათის მფლობელი' : _nameCtrl.text.toUpperCase(),
-                      style: const TextStyle(color: Colors.white60, fontSize: 13)),
-                ],
-              ),
+        child: _hasSaved ? Column(children: [
+          Container(
+            height: 180,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(colors: [kDark, Color(0xFF2D4A38)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+              borderRadius: BorderRadius.circular(20),
             ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.delete_outline, color: Colors.red),
-                label: const Text('ბარათის წაშლა', style: TextStyle(color: Colors.red)),
-                style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: Colors.red),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-                onPressed: _remove,
-              ),
-            ),
-          ],
-        ) : Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('ახალი ბარათის დამატება', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kDark)),
-            const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
-                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)]),
-              child: Column(children: [
-                _cField(_nameCtrl, 'სახელი გვარი', 'GIORGI BERIDZE', Icons.person_outline),
-                const SizedBox(height: 14),
-                _cField(_numberCtrl, 'ბარათის ნომერი', '0000 0000 0000 0000', Icons.credit_card, type: TextInputType.number, max: 19),
-                const SizedBox(height: 14),
-                Row(children: [
-                  Expanded(child: _cField(_expiryCtrl, 'ვადა', 'MM/YY', Icons.calendar_today, max: 5)),
-                  const SizedBox(width: 14),
-                  Expanded(child: _cField(_cvvCtrl, 'CVV', '•••', Icons.lock_outline, type: TextInputType.number, max: 3, obscure: true)),
-                ]),
+            padding: const EdgeInsets.all(24),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                const Text('Velocar Card', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                const Icon(Icons.credit_card, color: kGreen, size: 32),
               ]),
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity, height: 54,
-              child: ElevatedButton(
-                onPressed: _loading ? null : _save,
-                style: ElevatedButton.styleFrom(backgroundColor: kGreen, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13))),
-                child: _loading
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text('ბარათის შენახვა', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Icon(Icons.lock, size: 13, color: Colors.grey[400]),
-              const SizedBox(width: 4),
-              Text('დაცული გადახდა', style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+              const Spacer(),
+              Text('•••• •••• •••• $_last4', style: const TextStyle(color: Colors.white, fontSize: 22, letterSpacing: 3, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Text(_nameCtrl.text.isEmpty ? 'ბარათის მფლობელი' : _nameCtrl.text.toUpperCase(),
+                  style: const TextStyle(color: Colors.white60, fontSize: 13)),
             ]),
-          ],
-        ),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.delete_outline, color: Colors.red),
+              label: const Text('ბარათის წაშლა', style: TextStyle(color: Colors.red)),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Colors.red),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              onPressed: _remove,
+            ),
+          ),
+        ]) : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('ახალი ბარათის დამატება', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kDark)),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)]),
+            child: Column(children: [
+              _cField(_nameCtrl, 'სახელი გვარი', 'GIORGI BERIDZE', Icons.person_outline),
+              const SizedBox(height: 14),
+              _cField(_numberCtrl, 'ბარათის ნომერი', '0000 0000 0000 0000', Icons.credit_card, type: TextInputType.number, max: 19),
+              const SizedBox(height: 14),
+              Row(children: [
+                Expanded(child: _cField(_expiryCtrl, 'ვადა', 'MM/YY', Icons.calendar_today, max: 5)),
+                const SizedBox(width: 14),
+                Expanded(child: _cField(_cvvCtrl, 'CVV', '•••', Icons.lock_outline, type: TextInputType.number, max: 3, obscure: true)),
+              ]),
+            ]),
+          ),
+          const SizedBox(height: 24),
+          SizedBox(
+            width: double.infinity, height: 54,
+            child: ElevatedButton(
+              onPressed: _loading ? null : _save,
+              style: ElevatedButton.styleFrom(backgroundColor: kGreen, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13))),
+              child: _loading
+                  ? const CircularProgressIndicator(color: Colors.white)
+                  : const Text('ბარათის შენახვა', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(Icons.lock, size: 13, color: Colors.grey[400]),
+            const SizedBox(width: 4),
+            Text('დაცული გადახდა', style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+          ]),
+        ]),
       ),
     );
   }
 
   Widget _cField(TextEditingController ctrl, String label, String hint, IconData icon,
       {TextInputType? type, int? max, bool obscure = false}) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: kDark)),
-        const SizedBox(height: 6),
-        TextField(
-          controller: ctrl, keyboardType: type, maxLength: max, obscureText: obscure,
-          decoration: InputDecoration(
-            hintText: hint,
-            prefixIcon: Icon(icon, color: kGreen, size: 20),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: kGreen)),
-            counterText: '',
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-          ),
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: kDark)),
+      const SizedBox(height: 6),
+      TextField(
+        controller: ctrl, keyboardType: type, maxLength: max, obscureText: obscure,
+        decoration: InputDecoration(
+          hintText: hint,
+          prefixIcon: Icon(icon, color: kGreen, size: 20),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: kGreen)),
+          counterText: '',
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         ),
-      ],
-    );
+      ),
+    ]);
   }
 }
 
@@ -1042,25 +1414,26 @@ class _TripsScreenState extends State<TripsScreen> {
         backgroundColor: kDark,
         title: const Text('ჩემი მოგზაურობები', style: TextStyle(color: Colors.white)),
         automaticallyImplyLeading: false,
+        actions: [
+          IconButton(icon: const Icon(Icons.refresh, color: Colors.white), onPressed: _load),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: kGreen))
           : _trips.isEmpty
-          ? Center(child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.history, size: 80, color: Colors.grey[300]),
-          const SizedBox(height: 16),
-          Text('მოგზაურობები ჯერ არ გაქვს', style: TextStyle(color: Colors.grey[500], fontSize: 16)),
-          const SizedBox(height: 8),
-          Text('QR სკანირებით დაიწყე!', style: TextStyle(color: Colors.grey[400], fontSize: 13)),
-        ],
-      ))
+          ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Icon(Icons.history, size: 80, color: Colors.grey[300]),
+        const SizedBox(height: 16),
+        Text('მოგზაურობები ჯერ არ გაქვს', style: TextStyle(color: Colors.grey[500], fontSize: 16)),
+        const SizedBox(height: 8),
+        Text('QR სკანირებით დაიწყე!', style: TextStyle(color: Colors.grey[400], fontSize: 13)),
+      ]))
           : ListView.builder(
         padding: const EdgeInsets.all(16),
         itemCount: _trips.length,
         itemBuilder: (_, i) {
           final t = _trips[i];
+          final completed = t['status'] == 'completed';
           return Container(
             margin: const EdgeInsets.only(bottom: 12),
             padding: const EdgeInsets.all(16),
@@ -1075,12 +1448,20 @@ class _TripsScreenState extends State<TripsScreen> {
               const SizedBox(width: 14),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(t['device_id'] ?? '—', style: const TextStyle(fontWeight: FontWeight.bold, color: kDark)),
+                if (t['duration_minutes'] != null)
+                  Text('${t['duration_minutes']} წუთი', style: TextStyle(color: Colors.grey[500], fontSize: 12)),
                 Text('₾${t['amount_paid'] ?? 0}', style: const TextStyle(color: kGreen, fontWeight: FontWeight.w600)),
               ])),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: kGreen.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                child: Text(t['status'] ?? '—', style: const TextStyle(color: kGreen, fontSize: 12, fontWeight: FontWeight.w600)),
+                decoration: BoxDecoration(
+                  color: completed ? kGreen.withOpacity(0.1) : kOrange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  completed ? 'დასრულდა' : (t['status'] ?? '—'),
+                  style: TextStyle(color: completed ? kGreen : kOrange, fontSize: 12, fontWeight: FontWeight.w600),
+                ),
               ),
             ]),
           );
@@ -1132,45 +1513,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       body: Padding(
         padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20),
-                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)]),
-              child: Column(children: [
-                Container(
-                  width: 80, height: 80,
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(colors: [kGreen, kOrange]),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.person, size: 44, color: Colors.white),
+        child: Column(children: [
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20),
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)]),
+            child: Column(children: [
+              Container(
+                width: 80, height: 80,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(colors: [kGreen, kOrange]),
+                  shape: BoxShape.circle,
                 ),
-                const SizedBox(height: 14),
-                Text(_username, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: kDark)),
-                const SizedBox(height: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-                  decoration: BoxDecoration(color: kGreen.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
-                  child: Text(_role, style: const TextStyle(color: kGreen, fontWeight: FontWeight.w600)),
-                ),
-              ]),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
-                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)]),
-              child: Column(children: [
-                _tile(Icons.credit_card, 'ბარათის მართვა', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CardScreen()))),
-                const Divider(height: 1, indent: 56),
-                _tile(Icons.qr_code_scanner, 'QR სკანირება', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const QRScanScreen()))),
-                const Divider(height: 1, indent: 56),
-                _tile(Icons.logout, 'გამოსვლა', color: Colors.red, onTap: _logout),
-              ]),
-            ),
-          ],
-        ),
+                child: const Icon(Icons.person, size: 44, color: Colors.white),
+              ),
+              const SizedBox(height: 14),
+              Text(_username, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: kDark)),
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                decoration: BoxDecoration(color: kGreen.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
+                child: Text(_role, style: const TextStyle(color: kGreen, fontWeight: FontWeight.w600)),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)]),
+            child: Column(children: [
+              _tile(Icons.credit_card, 'ბარათის მართვა', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CardScreen()))),
+              const Divider(height: 1, indent: 56),
+              _tile(Icons.qr_code_scanner, 'QR სკანირება', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const QRScanScreen()))),
+              const Divider(height: 1, indent: 56),
+              _tile(Icons.logout, 'გამოსვლა', color: Colors.red, onTap: _logout),
+            ]),
+          ),
+        ]),
       ),
     );
   }
