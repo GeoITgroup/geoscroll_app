@@ -98,9 +98,6 @@ class VelocarApp extends StatelessWidget {
       home: InAppNotificationWrapper(key: _notificationKey, child: const SplashScreen()));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// IN-APP NOTIFICATION BANNER
-// ─────────────────────────────────────────────────────────────────────────────
 class InAppNotificationWrapper extends StatefulWidget {
   final Widget child;
   const InAppNotificationWrapper({super.key, required this.child});
@@ -142,56 +139,30 @@ class _InAppNotificationState extends State<InAppNotificationWrapper>
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        widget.child,
-        if (_visible)
-          Positioned(
-            top: 0, left: 0, right: 0,
-            child: SlideTransition(
-              position: _slide,
-              child: SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Material(
-                    elevation: 8,
-                    borderRadius: BorderRadius.circular(14),
-                    child: Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                          color: kDark, borderRadius: BorderRadius.circular(14)),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 40, height: 40,
-                            decoration: const BoxDecoration(color: kGreen, shape: BoxShape.circle),
-                            child: const Icon(Icons.notifications, color: Colors.white, size: 20),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
+    return Stack(children: [
+      widget.child,
+      if (_visible)
+        Positioned(top: 0, left: 0, right: 0,
+            child: SlideTransition(position: _slide,
+                child: SafeArea(child: Padding(padding: const EdgeInsets.all(12),
+                    child: Material(elevation: 8, borderRadius: BorderRadius.circular(14),
+                        child: Container(padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(color: kDark, borderRadius: BorderRadius.circular(14)),
+                            child: Row(children: [
+                              Container(width: 40, height: 40,
+                                  decoration: const BoxDecoration(color: kGreen, shape: BoxShape.circle),
+                                  child: const Icon(Icons.notifications, color: Colors.white, size: 20)),
+                              const SizedBox(width: 12),
+                              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                                 Text(_title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
                                 const SizedBox(height: 2),
                                 Text(_body, style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12)),
-                              ],
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.close, color: Colors.white54, size: 18),
-                            onPressed: () => _anim.reverse().then((_) => setState(() => _visible = false)),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
+                              ])),
+                              IconButton(
+                                  icon: const Icon(Icons.close, color: Colors.white54, size: 18),
+                                  onPressed: () => _anim.reverse().then((_) => setState(() => _visible = false))),
+                            ])))))))
+    ]);
   }
 }
 
@@ -210,9 +181,6 @@ Widget _logo(double size, double iconSize) => Container(
         borderRadius: BorderRadius.circular(size * 0.255)),
     child: Icon(Icons.electric_scooter, size: iconSize, color: Colors.white));
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SPLASH
-// ─────────────────────────────────────────────────────────────────────────────
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
   @override State<SplashScreen> createState() => _SplashScreenState();
@@ -244,9 +212,6 @@ class _SplashScreenState extends State<SplashScreen> {
         const SizedBox(height: 48), const CircularProgressIndicator(color: kGreen)])));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// LOGIN
-// ─────────────────────────────────────────────────────────────────────────────
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
   @override State<LoginScreen> createState() => _LoginScreenState();
@@ -360,9 +325,6 @@ class _LoginScreenState extends State<LoginScreen> {
               focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(13), borderSide: const BorderSide(color: kGreen, width: 1.5))));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MAIN SCREEN
-// ─────────────────────────────────────────────────────────────────────────────
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
   @override State<MainScreen> createState() => _MainScreenState();
@@ -387,9 +349,6 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MAP HOME
-// ─────────────────────────────────────────────────────────────────────────────
 class MapHomeScreen extends StatefulWidget {
   const MapHomeScreen({super.key});
   @override State<MapHomeScreen> createState() => _MapHomeScreenState();
@@ -479,11 +438,8 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
     GoogleMap(
       initialCameraPosition: CameraPosition(target: _center, zoom: 14),
       onMapCreated: (c) { _mapCtrl = c; },
-      myLocationEnabled: true,
-      myLocationButtonEnabled: false,
-      zoomControlsEnabled: false,
-      markers: _markers,
-      polygons: _polygons,
+      myLocationEnabled: true, myLocationButtonEnabled: false, zoomControlsEnabled: false,
+      markers: _markers, polygons: _polygons,
     ),
     Positioned(top: 0, left: 0, right: 0,
         child: Container(
@@ -546,9 +502,6 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// QR SCAN
-// ─────────────────────────────────────────────────────────────────────────────
 class QRScanScreen extends StatefulWidget {
   const QRScanScreen({super.key});
   @override State<QRScanScreen> createState() => _QRScanScreenState();
@@ -628,9 +581,6 @@ class _OverlayPainter extends CustomPainter {
   @override bool shouldRepaint(_) => false;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SCOOTER DETAIL
-// ─────────────────────────────────────────────────────────────────────────────
 class ScooterDetailScreen extends StatefulWidget {
   final String deviceId;
   const ScooterDetailScreen({super.key, required this.deviceId});
@@ -759,9 +709,6 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
     Text(value,style:const TextStyle(fontWeight:FontWeight.w600,color:kDark))]));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ACTIVE RIDE
-// ─────────────────────────────────────────────────────────────────────────────
 class ActiveRideScreen extends StatefulWidget {
   final int tripId; final String deviceId;
   const ActiveRideScreen({super.key, required this.tripId, required this.deviceId});
@@ -860,9 +807,6 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
       ]))));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TRIPS
-// ─────────────────────────────────────────────────────────────────────────────
 class TripsScreen extends StatefulWidget {
   const TripsScreen({super.key});
   @override State<TripsScreen> createState() => _TripsScreenState();
@@ -907,9 +851,6 @@ class _TripsScreenState extends State<TripsScreen> {
       }));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MENU SCREEN
-// ─────────────────────────────────────────────────────────────────────────────
 class MenuScreen extends StatefulWidget {
   const MenuScreen({super.key});
   @override State<MenuScreen> createState() => _MenuScreenState();
@@ -1030,33 +971,195 @@ class _MenuScreenState extends State<MenuScreen> {
       child: Text(text, style: TextStyle(color:color,fontSize:11,fontWeight:FontWeight.w600)));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ACCOUNT SETTINGS
-// ─────────────────────────────────────────────────────────────────────────────
 class AccountSettingsScreen extends StatefulWidget {
   final VoidCallback? onUpdate;
   const AccountSettingsScreen({super.key, this.onUpdate});
   @override State<AccountSettingsScreen> createState() => _AccountSettingsScreenState();
 }
 class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
-String _username='', _email='', _photoUrl=''; bool _verified=false;
-@override void initState() { super.initState(); _load(); }
-Future<void> _load() async {
-final prefs = await SharedPreferences.getInstance();
-setState(() { _username=prefs.getString('username')??'—'; _email=prefs.getString('email')??'';
-_photoUrl=prefs.getString('photo_url')??''; _verified=prefs.getBool('verified')??false; });
+  String _username='', _email='', _photoUrl=''; bool _verified=false;
+  @override void initState() { super.initState(); _load(); }
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() { _username=prefs.getString('username')??'—'; _email=prefs.getString('email')??'';
+    _photoUrl=prefs.getString('photo_url')??''; _verified=prefs.getBool('verified')??false; });
+  }
+  @override Widget build(BuildContext context) => Scaffold(backgroundColor: kBg,
+      appBar: AppBar(backgroundColor: kDark,
+          title: const Text('Account & Settings',style:TextStyle(color:Colors.white)),
+          leading: IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
+      body: SingleChildScrollView(padding: const EdgeInsets.all(20), child: Column(children: [
+        Container(padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(20),boxShadow:[BoxShadow(color:Colors.black.withOpacity(0.05),blurRadius:10)]),
+            child: Column(children: [
+              _photoUrl.isNotEmpty
+                  ? CircleAvatar(radius:44,backgroundImage:NetworkImage(_photoUrl),onBackgroundImageError:(_,__)  {})
+                  : Container(width:88,height:88,decoration:const BoxDecoration(gradient:LinearGradient(colors:[kGreen,kOrange]),shape:BoxShape.circle),
+                  child:const Icon(Icons.person,size:44,color:Colors.white)),
+              const SizedBox(height:14),
+              Text(_username,style:const TextStyle(fontSize:22,fontWeight:FontWeight.bold,color:kDark)),
+              const SizedBox(height:10),
+              Container(padding:const EdgeInsets.symmetric(horizontal:14,vertical:5),
+                  decoration:BoxDecoration(color:_verified?kGreen.withOpacity(0.1):Colors.yellow.withOpacity(0.15),borderRadius:BorderRadius.circular(20)),
+                  child:Text(_verified?'✅ Verified':'⚠️ Unverified',
+                      style:TextStyle(color:_verified?kGreen:Colors.yellow[800],fontWeight:FontWeight.w600)))])),
+        const SizedBox(height:20),
+        if (!_verified) Container(padding:const EdgeInsets.all(16),
+            decoration:BoxDecoration(color:Colors.yellow.withOpacity(0.08),borderRadius:BorderRadius.circular(14),border:Border.all(color:Colors.yellow.withOpacity(0.3))),
+            child:const Row(children:[Icon(Icons.warning_amber,color:Colors.orange),SizedBox(width:12),
+              Expanded(child:Text('ანგარიშის ვერიფიკაციისთვის დაუკავშირდი მხარდაჭერას',style:TextStyle(fontSize:13,color:kDark)))])),
+        const SizedBox(height:16),
+        Container(decoration:BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(16),boxShadow:[BoxShadow(color:Colors.black.withOpacity(0.04),blurRadius:8)]),
+            child:Column(children:[
+              _iRow(Icons.person,'სახელი',_username),
+              const Divider(height:1,indent:56),
+              _iRow(Icons.email_outlined,'ელ-ფოსტა',_email.isNotEmpty?_email:'—')])),
+      ])));
+
+  Widget _iRow(IconData icon, String label, String value) => ListTile(
+      leading: Icon(icon,color:kGreen,size:22),
+      title: Text(label,style:TextStyle(color:Colors.grey[500],fontSize:12)),
+      subtitle: Text(value,style:const TextStyle(color:kDark,fontWeight:FontWeight.w500,fontSize:15)));
+}
+
+class CardScreen extends StatefulWidget {
+  const CardScreen({super.key});
+  @override State<CardScreen> createState() => _CardScreenState();
+}
+class _CardScreenState extends State<CardScreen> {
+bool _loading=false, _hasCard=false; Map? _cardInfo;
+@override void initState() { super.initState(); _loadCard(); }
+Future<void> _loadCard() async {
+setState(()=>_loading=true);
+try {
+final h = await _authHeaders();
+final res = await http.get(Uri.parse('$BASE_URL/api/user/card-status'), headers: h);
+final d = jsonDecode(res.body);
+if (mounted) setState(() { _hasCard=d['has_card']==true; _cardInfo=d['card']; });
+} catch (_) {}
+setState(()=>_loading=false);
+}
+Future<void> _addCard() async {
+setState(()=>_loading=true);
+try {
+final h = await _authHeaders();
+final res = await http.post(Uri.parse('$BASE_URL/api/bog/save-card'), headers: h,
+body: jsonEncode({'return_url': '$BASE_URL/card-success'}));
+final d = jsonDecode(res.body);
+if (d['redirect_url']!=null) { final uri=Uri.parse(d['redirect_url'] as String); if (await canLaunchUrl(uri)) await launchUrl(uri,mode:LaunchMode.externalApplication); }
+else { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('სერვერის შეცდომა'))); }
+} catch (_) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('კავშირის შეცდომა'))); }
+setState(()=>_loading=false);
+}
+Future<void> _removeCard() async {
+final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
+title: const Text('ბარათის წაშლა'), content: const Text('დარწმუნებული ხარ?'),
+actions: [TextButton(onPressed:()=>Navigator.pop(context,false),child:const Text('გაუქმება')),
+ElevatedButton(onPressed:()=>Navigator.pop(context,true),style:ElevatedButton.styleFrom(backgroundColor:Colors.red),
+child:const Text('წაშლა',style:TextStyle(color:Colors.white)))]));
+if (ok!=true) return;
+setState(()=>_loading=true);
+try {
+final h = await _authHeaders();
+await http.delete(Uri.parse('$BASE_URL/api/user/card'), headers: h);
+final prefs = await SharedPreferences.getInstance(); await prefs.setBool('has_card',false);
+await _loadCard();
+} catch (_) {}
+setState(()=>_loading=false);
 }
 @override Widget build(BuildContext context) => Scaffold(backgroundColor: kBg,
 appBar: AppBar(backgroundColor: kDark,
-title: const Text('Account & Settings',style:TextStyle(color:Colors.white)),
+title: const Text('Wallet & Payments',style:TextStyle(color:Colors.white)),
 leading: IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
-body: SingleChildScrollView(padding: const EdgeInsets.all(20), child: Column(children: [
-Container(padding: const EdgeInsets.all(24),
-decoration: BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(20),boxShadow:[BoxShadow(color:Colors.black.withOpacity(0.05),blurRadius:10)]),
-child: Column(children: [
-_photoUrl.isNotEmpty
-? CircleAvatar(radius:44,backgroundImage:NetworkImage(_photoUrl),onBackgroundImageError:(_,__)  {})
-: Container(width:88,height:88,decoration:const BoxDecoration(gradient:LinearGradient(colors:[kGreen,kOrange]),shape:BoxShape.circle),
-child:const Icon(Icons.person,size:44,color:Colors.white)),
-const SizedBox(height:14),
-Text(_username,style:const TextStyle(fontSize:22,fontWeight:FontWeight.bold,color:kDark
+body: _loading?const Center(child:CircularProgressIndicator(color:kGreen))
+:Padding(padding:const EdgeInsets.all(20),child:Column(children:[
+Container(width:double.infinity,height:190,
+decoration:BoxDecoration(gradient:const LinearGradient(colors:[kDark,Color(0xFF2E4D3A)],begin:Alignment.topLeft,end:Alignment.bottomRight),
+borderRadius:BorderRadius.circular(20),boxShadow:[BoxShadow(color:kDark.withOpacity(0.35),blurRadius:20,offset:const Offset(0,8))]),
+padding:const EdgeInsets.all(24),
+child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+const Text('VELOCAR',style:TextStyle(color:Colors.white,fontSize:18,fontWeight:FontWeight.bold,letterSpacing:2)),
+Icon(_hasCard?Icons.credit_card:Icons.credit_card_off,color:Colors.white.withOpacity(0.6),size:28)]),
+const Spacer(),
+Text(_hasCard&&_cardInfo?['masked_number']!=null?_cardInfo!['masked_number']:'•••• •••• •••• ••••',
+style:TextStyle(color:Colors.white.withOpacity(0.9),fontSize:20,letterSpacing:4,fontWeight:FontWeight.w300)),
+const SizedBox(height:16),
+Row(
+class FaqScreen extends StatelessWidget {
+const FaqScreen({super.key});
+static const _faqs = [
+('როგორ დავიწყო გაქირავება?',    'გახსენი აპი, დააჭირე სქროლის სკანირება და დაასკანირე სქროლზე არსებული QR კოდი.'),
+('რა ღირს გაქირავება?',          '₾0.15 წუთში. პირველი წუთი უფასოა.'),
+('სად შემიძლია სქროლის დატოვება?','სქროლი დატოვე მწვანე ზონაში — რუკაზე ნაჩვენები სერვის არეალი.'),
+('ბატარეა გამოილია — რა ვქნა?',  'სქროლი მაინც შეაჩერე აპიდან. დაგვიკავშირდი Live Chat-ის გზით.'),
+('გადახდა ვერ მოხდა — რა ვქნა?', 'შეამოწმე ბარათი Wallet & Payments-ში. BOG ბარათი უნდა იყოს მიბმული.'),
+('მოგზაურობა ვერ ვხედავ?',        'ისტორია ტაბზე ნახავ ყველა მოგზაურობას. პრობლემის შემთხვევაში Live Chat-ზე გვწერე.'),
+];
+@override Widget build(BuildContext context) => Scaffold(backgroundColor: kBg,
+appBar: AppBar(backgroundColor:kDark, title:const Text('FAQ',style:TextStyle(color:Colors.white)),
+leading:IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
+body: ListView.builder(padding:const EdgeInsets.all(16),itemCount:_faqs.length,itemBuilder:(_,i){
+final (q,a) = _faqs[i];
+return Container(margin:const EdgeInsets.only(bottom:12),
+decoration:BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(14),boxShadow:[BoxShadow(color:Colors.black.withOpacity(0.04),blurRadius:8)]),
+child:ExpansionTile(
+leading:Container(width:32,height:32,decoration:BoxDecoration(color:kGreen.withOpacity(0.1),shape:BoxShape.circle),child:const Icon(Icons.help_outline,color:kGreen,size:18)),
+title:Text(q,style:const TextStyle(fontWeight:FontWeight.w600,color:kDark,fontSize:14)),
+children:[Padding(padding:const EdgeInsets.fromLTRB(16,0,16,16),
+child:Text(a,style:TextStyle(color:Colors.grey[600],fontSize:13,height:1.5)))]));
+}));
+}
+
+class SafetyScreen extends StatelessWidget {
+const SafetyScreen({super.key});
+static const _rules = [
+(Icons.security,      'ჩაფხუტი',       'გამოიყენე ჩაფხუტი სიარულის დროს.'),
+(Icons.speed,         'სიჩქარე',        'ქალაქში მაქსიმუმ 25 კმ/სთ.'),
+(Icons.no_drinks,     'ალკოჰოლი',       'ალკოჰოლის ზემოქმედებით სიარული მკაცრად აკრძალულია.'),
+(Icons.people,        'ერთი მგზავრი',   'სქროლზე ერთი ადამიანი იჯდება.'),
+(Icons.phone_android, 'ტელეფონი',       'სიარულის დროს ტელეფონის გამოყენება საშიშია.'),
+(Icons.park,          'ქვეითთა ბილიკი', 'ქვეითთა ბილიკებზე სიარული აკრძალულია.'),
+];
+@override Widget build(BuildContext context) => Scaffold(backgroundColor:kBg,
+appBar:AppBar(backgroundColor:kDark,title:const Text('Safety',style:TextStyle(color:Colors.white)),
+leading:IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
+body:ListView(padding:const EdgeInsets.all(16),children:[
+Container(padding:const EdgeInsets.all(16),margin:const EdgeInsets.only(bottom:16),
+decoration:BoxDecoration(color:kGreen.withOpacity(0.08),borderRadius:BorderRadius.circular(14),border:Border.all(color:kGreen.withOpacity(0.2))),
+child:const Row(children:[Icon(Icons.shield,color:kGreen),SizedBox(width:12),
+Expanded(child:Text('შენი უსაფრთხოება ჩვენთვის პრიორიტეტია.',style:TextStyle(color:kGreen,fontWeight:FontWeight.w600)))])),
+..._rules.map((r){final(icon,title,desc)=r; return Container(margin:const EdgeInsets.only(bottom:10),padding:const EdgeInsets.all(16),
+decoration:BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(14),boxShadow:[BoxShadow(color:Colors.black.withOpacity(0.04),blurRadius:8)]),
+child:Row(children:[Container(width:44,height:44,decoration:BoxDecoration(color:kGreen.withOpacity(0.1),shape:BoxShape.circle),child:Icon(icon,color:kGreen,size:22)),
+const SizedBox(width:14),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+Text(title,style:const TextStyle(fontWeight:FontWeight.bold,color:kDark)),const SizedBox(height:2),
+Text(desc,style:TextStyle(color:Colors.grey[600],fontSize:13))]))]));})
+]));
+}
+
+class HowToRideScreen extends StatelessWidget {
+const HowToRideScreen({super.key});
+static const _steps = [
+(Icons.download_done,        'აპის გახსნა',   'გახსენი Velocar და შედი შენი ანგარიშით.'),
+(Icons.qr_code_scanner,      'QR სკანირება',  'სქროლთან მიახლოვდი და დაასკანირე QR კოდი.'),
+(Icons.payment,              'გადახდა',       'BOG ბარათით გაიარე გადახდა. სქროლი იხსნება.'),
+(Icons.electric_scooter,     'სიარული',       'გამოიყენე სქროლი. ყურადღება მიმოქცევაზე!'),
+(Icons.location_on,          'სერვის ზონა',   'დარჩი მწვანე ზონაში — გარეთ გასვლა დაუშვებელია.'),
+(Icons.stop_circle_outlined, 'დასრულება',     'ჩააპარკე სქროლი სწორ ადგილას და დაასრულე გაქირავება.'),
+];
+@override Widget build(BuildContext context) => Scaffold(backgroundColor:kBg,
+appBar:AppBar(backgroundColor:kDark,title:const Text('How to Ride',style:TextStyle(color:Colors.white)),
+leading:IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
+body:ListView.builder(padding:const EdgeInsets.all(16),itemCount:_steps.length,itemBuilder:(_,i){
+final(icon,title,desc)=_steps[i];
+return Row(crossAxisAlignment:CrossAxisAlignment.start,children:[
+Column(children:[Container(width:44,height:44,decoration:const BoxDecoration(color:kGreen,shape:BoxShape.circle),
+child:Center(child:Icon(icon,color:Colors.white,size:22))),
+if(i<_steps.length-1)Container(width:2,height:40,color:kGreen.withOpacity(0.2))]),
+const SizedBox(width:16),
+Expanded(child:Padding(padding:const EdgeInsets.only(bottom:24),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+const SizedBox(height:10),Text(title,style:const TextStyle(fontWeight:FontWeight.bold,color:kDark,fontSize:15)),
+const SizedBox(height:4),Text(desc,style:TextStyle(color:Colors.grey[600],fontSize:13,height:1.5))])))]);
+}));
+}
