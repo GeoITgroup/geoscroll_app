@@ -449,17 +449,55 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
   }
 
   Future<void> _startRide() async {
+    // ბატარეის შემოწმება
+    final battery = int.tryParse(_scooter?['battery']?.toString() ?? '100') ?? 100;
+    if (battery < 5) {
+      if (mounted) showDialog(context: context, builder: (_) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(children: [Icon(Icons.battery_alert, color: Colors.red), SizedBox(width: 8), Text('ბატარეა ძალიან დაბალია')]),
+          content: Text('სქროლის ბატარეა მხოლოდ $battery% არის.\n\nგაქირავება შეუძლებელია — სქროლი ვერ მიგიყვანს დანიშნულებამდე.'),
+          actions: [ElevatedButton(onPressed: ()=>Navigator.pop(context),
+              style: ElevatedButton.styleFrom(backgroundColor: kDark),
+              child: const Text('გასაგებია', style: TextStyle(color: Colors.white)))]));
+      return;
+    }
+    // ბარათის შემოწმება
+    final prefs = await SharedPreferences.getInstance();
+    final hasCard = prefs.getBool('has_card') ?? false;
+    if (!hasCard) {
+      if (mounted) showDialog(context: context, builder: (_) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(children: [Icon(Icons.credit_card_off, color: kOrange), SizedBox(width: 8), Flexible(child: Text('ბარათი არ არის'))]),
+          content: const Text('გაქირავებამდე BOG ბარათი უნდა მიაბა.\n\nWallet & Payments-ში დაამატე ბარათი.'),
+          actions: [
+            TextButton(onPressed: ()=>Navigator.pop(context), child: const Text('გაუქმება')),
+            ElevatedButton(
+                onPressed: () { Navigator.pop(context); Navigator.push(context, _route(const CardScreen())); },
+                style: ElevatedButton.styleFrom(backgroundColor: kGreen),
+                child: const Text('ბარათის დამატება', style: TextStyle(color: Colors.white)))]));
+      return;
+    }
     setState(()=>_starting=true);
     try {
       final h = await _authHeaders();
       final res = await http.post(Uri.parse('$BASE_URL/api/bog/pay'), headers: h,
-          body: jsonEncode({'device_id': widget.deviceId, 'amount': '1.00'}));
+          body: jsonEncode({'device_id': widget.deviceId, 'amount': '1.00', 'user_id': prefs.getInt('user_id')??1}));
       final data = jsonDecode(res.body);
+      if (data['error'] == 'low_battery') {
+        setState(()=>_starting=false);
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(backgroundColor: Colors.red[700], content: Text(data['message'] ?? 'ბატარეა ძალიან დაბალია')));
+        return;
+      }
+      if (data['error'] == 'no_card') {
+        setState(()=>_starting=false);
+        if (mounted) Navigator.push(context, _route(const CardScreen()));
+        return;
+      }
       if (data['success']==true && data['redirect_url']!=null) {
         final uri = Uri.parse(data['redirect_url'] as String);
         if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
       } else {
-        final prefs = await SharedPreferences.getInstance();
         final tr = await http.post(Uri.parse('$BASE_URL/api/trips/start'), headers: h,
             body: jsonEncode({'device_id': widget.deviceId, 'user_id': prefs.getInt('user_id')??1}));
         final td = jsonDecode(tr.body);
@@ -547,10 +585,37 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     if (ok!=true) return;
     setState(()=>_ending=true);
     try {
+      // GPS პოზიციის მიღება
+      double? lat, lng;
+      try {
+        var perm = await Geolocator.checkPermission();
+        if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
+        if (perm != LocationPermission.denied) {
+          final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+          lat = pos.latitude; lng = pos.longitude;
+        }
+      } catch(_) {}
+
       final h = await _authHeaders();
-      final res = await http.post(Uri.parse('$BASE_URL/api/trips/end'), headers: h,
-          body: jsonEncode({'trip_id': widget.tripId, 'device_id': widget.deviceId}));
+      final body = <String, dynamic>{'trip_id': widget.tripId, 'device_id': widget.deviceId};
+      if (lat != null && lng != null) { body['latitude'] = lat; body['longitude'] = lng; }
+
+      final res = await http.post(Uri.parse('$BASE_URL/api/trips/end'), headers: h, body: jsonEncode(body));
       final data = jsonDecode(res.body);
+
+      // ზონის შეცდომა
+      if (data['error'] == 'zone_violation') {
+        setState(()=>_ending=false);
+        if (mounted) showDialog(context: context, builder: (_) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Row(children: [Icon(Icons.location_off, color: kOrange), SizedBox(width: 8), Flexible(child: Text('ზონის გარეთ ხარ!'))]),
+            content: Text('${data['message']}\n\nტარიფი გრძელდება სანამ მწვანე ზონაში არ დაბრუნდები.'),
+            actions: [ElevatedButton(onPressed: ()=>Navigator.pop(context),
+                style: ElevatedButton.styleFrom(backgroundColor: kGreen),
+                child: const Text('გავიგე', style: TextStyle(color: Colors.white)))]));
+        return;
+      }
+
       if (data['success']==true) {
         final prefs = await SharedPreferences.getInstance();
         await prefs.remove('active_trip_id'); await prefs.remove('active_device_id');
