@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' hide Path;
 import 'dart:ui' as ui;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -234,7 +232,9 @@ class MapHomeScreen extends StatefulWidget {
 class _MapHomeScreenState extends State<MapHomeScreen> {
   List _scooters = [], _geofences = [];
   LatLng _center = const LatLng(41.6938, 44.8015);
-  final MapController _mapCtrl = MapController();
+  GoogleMapController? _mapCtrl;
+  final Set<Marker> _markers = {};
+  final Set<Polygon> _polygons = {};
 
   @override void initState() { super.initState(); _loadData(); _getLocation(); }
 
@@ -246,7 +246,7 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
       if (p == LocationPermission.denied) return;
       final pos = await Geolocator.getCurrentPosition();
       setState(() => _center = LatLng(pos.latitude, pos.longitude));
-      _mapCtrl.move(_center, 15);
+      _mapCtrl?.animateCamera(CameraUpdate.newLatLngZoom(_center, 15));
     } catch (_) {}
   }
 
@@ -257,7 +257,44 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
       final d1 = jsonDecode(r1.body); if (d1 is List) setState(() => _scooters = d1);
       final r2 = await http.get(Uri.parse('$BASE_URL/api/geofences'), headers: h);
       final d2 = jsonDecode(r2.body); if (d2 is List) setState(() => _geofences = d2);
+      _rebuildOverlays();
     } catch (_) {}
+  }
+
+  Future<BitmapDescriptor> _scooterIcon(bool ok) async {
+    return BitmapDescriptor.defaultMarkerWithHue(ok ? BitmapDescriptor.hueGreen : BitmapDescriptor.hueOrange);
+  }
+
+  void _rebuildOverlays() async {
+    final markers = <Marker>{};
+    for (final s in _scooters) {
+      if (s['latitude'] == null || s['longitude'] == null) continue;
+      final ok = s['status'] == 'available';
+      final icon = await _scooterIcon(ok);
+      markers.add(Marker(
+        markerId: MarkerId(s['device_id']?.toString() ?? s['id'].toString()),
+        position: LatLng(double.parse(s['latitude'].toString()), double.parse(s['longitude'].toString())),
+        icon: icon,
+        onTap: () => _showInfo(context, s),
+      ));
+    }
+    final polygons = <Polygon>{};
+    int gi = 0;
+    for (final g in _geofences) {
+      final pts = _parseGeofence(g);
+      if (pts.isEmpty) continue;
+      polygons.add(Polygon(
+        polygonId: PolygonId('geo_${gi++}'),
+        points: pts,
+        fillColor: kGreen.withOpacity(0.15),
+        strokeColor: kGreen,
+        strokeWidth: 2,
+      ));
+    }
+    if (mounted) setState(() {
+      _markers..clear()..addAll(markers);
+      _polygons..clear()..addAll(polygons);
+    });
   }
 
   List<LatLng> _parseGeofence(dynamic g) {
@@ -274,23 +311,15 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
   }
 
   @override Widget build(BuildContext context) => Scaffold(body: Stack(children: [
-    FlutterMap(mapController: _mapCtrl, options: MapOptions(initialCenter: _center, initialZoom: 14),
-        children: [
-          TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.velocar.app'),
-          PolygonLayer(polygons: _geofences.map((g) { final pts = _parseGeofence(g); if (pts.isEmpty) return null;
-          return Polygon(points: pts, color: kGreen.withOpacity(0.15), borderColor: kGreen, borderStrokeWidth: 2);
-          }).whereType<Polygon>().toList()),
-          MarkerLayer(markers: _scooters.where((s) => s['latitude'] != null && s['longitude'] != null).map((s) {
-            final ok = s['status'] == 'available';
-            return Marker(point: LatLng(double.parse(s['latitude'].toString()), double.parse(s['longitude'].toString())),
-                width: 56, height: 56,
-                child: GestureDetector(onTap: () => _showInfo(context, s),
-                    child: Container(width: 44, height: 44,
-                        decoration: BoxDecoration(color: ok ? kGreen : Colors.grey, shape: BoxShape.circle,
-                            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 8, offset: const Offset(0,3))]),
-                        child: const Icon(Icons.electric_scooter, color: Colors.white, size: 24))));
-          }).toList()),
-        ]),
+    GoogleMap(
+      initialCameraPosition: CameraPosition(target: _center, zoom: 14),
+      onMapCreated: (c) { _mapCtrl = c; },
+      myLocationEnabled: true,
+      myLocationButtonEnabled: false,
+      zoomControlsEnabled: false,
+      markers: _markers,
+      polygons: _polygons,
+    ),
     Positioned(top: 0, left: 0, right: 0,
         child: Container(
             decoration: BoxDecoration(gradient: LinearGradient(colors: [kDark, kDark.withOpacity(0)], begin: Alignment.topCenter, end: Alignment.bottomCenter)),
@@ -822,7 +851,7 @@ class _MenuScreenState extends State<MenuScreen> {
         _section([
           _tile(Icons.privacy_tip_outlined,     'Privacy Policy', onTap: () => _openUrl('$BASE_URL/privacy')),
           _div(),
-          _tile(Icons.chat_bubble_outline,      'Live Chat',      onTap: () => _openUrl('https://wa.me/995568877899')),
+          _tile(Icons.chat_bubble_outline,      'Live Chat',      onTap: () => _openUrl('https://wa.me/995000000000')),
           _div(),
           _tile(Icons.help_outline,             'FAQ',            onTap: () => Navigator.push(context, _route(FaqScreen()))),
           _div(),
