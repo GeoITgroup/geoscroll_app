@@ -1060,3 +1060,4 @@ _photoUrl.isNotEmpty
 child:const Icon(Icons.person,size:44,color:Colors.white)),
 const SizedBox(height:14),
 Text(_username,style:const TextStyle(fontSize:22,fontWeight:FontWeight.bold,color:kDark
+// updated
