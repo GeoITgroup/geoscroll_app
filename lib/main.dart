@@ -276,7 +276,7 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
   @override Widget build(BuildContext context) => Scaffold(body: Stack(children: [
     FlutterMap(mapController: _mapCtrl, options: MapOptions(initialCenter: _center, initialZoom: 14),
         children: [
-          TileLayer(urlTemplate: 'https://tile.mt0.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', userAgentPackageName: 'com.velocar.app'),
+          TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.velocar.app'),
           PolygonLayer(polygons: _geofences.map((g) { final pts = _parseGeofence(g); if (pts.isEmpty) return null;
           return Polygon(points: pts, color: kGreen.withOpacity(0.15), borderColor: kGreen, borderStrokeWidth: 2);
           }).whereType<Polygon>().toList()),
@@ -370,9 +370,17 @@ class _QRScanScreenState extends State<QRScanScreen> {
     if (value.isEmpty) return;
     setState(() => _scanned = true); _ctrl.stop();
     String deviceId = '';
-    if (value.contains('id='))             deviceId = Uri.parse(value).queryParameters['id'] ?? '';
-    else if (value.contains('device_id=')) deviceId = value.split('device_id=').last.trim();
-    else                                   deviceId = value.trim();
+    final v = value.trim();
+    try {
+      if (v.contains('?')) {
+        // URL ფორმატი: https://velocar.ge/ride?id=X ან geoscroll://scan?device_id=X
+        final uri = Uri.parse(v);
+        deviceId = uri.queryParameters['id'] ?? uri.queryParameters['device_id'] ?? '';
+      }
+      if (deviceId.isEmpty && v.contains('id='))         deviceId = v.split('id=').last.split('&').first.trim();
+      if (deviceId.isEmpty && v.contains('device_id='))  deviceId = v.split('device_id=').last.split('&').first.trim();
+      if (deviceId.isEmpty)                              deviceId = v; // უბრალო ნომერი
+    } catch (_) { deviceId = v; }
     if (deviceId.isNotEmpty) {
       Navigator.pushReplacement(context, _route(ScooterDetailScreen(deviceId: deviceId)));
     } else {
@@ -753,7 +761,22 @@ class _MenuScreenState extends State<MenuScreen> {
 
   Future<void> _openUrl(String url) async {
     final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        return;
+      }
+    } catch (_) {}
+    try {
+      await launchUrl(uri, mode: LaunchMode.platformDefault);
+      return;
+    } catch (_) {}
+    try {
+      await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ვერ გაიხსნა — დააკოპირე: +995 568 877 899')));
+    }
   }
 
   @override Widget build(BuildContext context) => Scaffold(backgroundColor: kBg,
@@ -799,7 +822,7 @@ class _MenuScreenState extends State<MenuScreen> {
         _section([
           _tile(Icons.privacy_tip_outlined,     'Privacy Policy', onTap: () => _openUrl('$BASE_URL/privacy')),
           _div(),
-          _tile(Icons.chat_bubble_outline,      'Live Chat',      onTap: () => _openUrl('https://wa.me/995568877899')),
+          _tile(Icons.chat_bubble_outline,      'Live Chat',      onTap: () => _openUrl('https://wa.me/995000000000')),
           _div(),
           _tile(Icons.help_outline,             'FAQ',            onTap: () => Navigator.push(context, _route(FaqScreen()))),
           _div(),
