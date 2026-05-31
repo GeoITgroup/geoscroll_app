@@ -23,44 +23,25 @@ const kBg         = Color(0xFFF4F6F4);
 
 final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BACKGROUND MESSAGE HANDLER (top-level function, required by FCM)
-// ─────────────────────────────────────────────────────────────────────────────
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PUSH NOTIFICATION SERVICE
-// ─────────────────────────────────────────────────────────────────────────────
 class PushNotificationService {
   static final FirebaseMessaging _messaging = FirebaseMessaging.instance;
 
   static Future<void> init() async {
-    // Permission request
-    await _messaging.requestPermission(
-      alert: true, badge: true, sound: true,
-    );
-
-    // FCM Token სერვერზე გაგზავნა
+    await _messaging.requestPermission(alert: true, badge: true, sound: true);
     final token = await _messaging.getToken();
     if (token != null) await _saveTokenToServer(token);
-
-    // Token განახლება
     _messaging.onTokenRefresh.listen(_saveTokenToServer);
-
-    // Foreground messages
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       _showInAppNotification(message);
     });
-
-    // Background tap → app open
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       _handleNotificationTap(message);
     });
-
-    // Background handler
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
   }
 
@@ -87,9 +68,7 @@ class PushNotificationService {
     );
   }
 
-  static void _handleNotificationTap(RemoteMessage message) {
-    // navigate based on data payload
-  }
+  static void _handleNotificationTap(RemoteMessage message) {}
 
   static Future<void> resendToken() async {
     final token = await _messaging.getToken();
@@ -97,7 +76,6 @@ class PushNotificationService {
   }
 }
 
-// Global key for in-app notification overlay
 final GlobalKey<_InAppNotificationState> _notificationKey = GlobalKey();
 
 void main() async {
@@ -111,19 +89,23 @@ class VelocarApp extends StatelessWidget {
   const VelocarApp({super.key});
   @override
   Widget build(BuildContext context) => MaterialApp(
-      title: 'Velocar', debugShowCheckedModeBanner: false,
-      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: kGreen, primary: kGreen),
-          useMaterial3: true, fontFamily: 'Roboto'),
-      home: InAppNotificationWrapper(child: const SplashScreen()));
+      title: 'Velocar',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(seedColor: kGreen, primary: kGreen),
+          useMaterial3: true,
+          fontFamily: 'Roboto'),
+      home: InAppNotificationWrapper(key: _notificationKey, child: const SplashScreen()));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// IN-APP NOTIFICATION BANNER (foreground push-ის დროს)
+// IN-APP NOTIFICATION BANNER
 // ─────────────────────────────────────────────────────────────────────────────
 class InAppNotificationWrapper extends StatefulWidget {
   final Widget child;
   const InAppNotificationWrapper({super.key, required this.child});
-  @override State<InAppNotificationWrapper> createState() => _InAppNotificationState();
+  @override
+  State<InAppNotificationWrapper> createState() => _InAppNotificationState();
 }
 
 class _InAppNotificationState extends State<InAppNotificationWrapper>
@@ -134,14 +116,20 @@ class _InAppNotificationState extends State<InAppNotificationWrapper>
   late AnimationController _anim;
   late Animation<Offset> _slide;
 
-  @override void initState() {
+  @override
+  void initState() {
     super.initState();
     _anim = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
     _slide = Tween<Offset>(begin: const Offset(0, -1), end: Offset.zero)
         .animate(CurvedAnimation(parent: _anim, curve: Curves.easeOut));
   }
 
-  @override void dispose() { _anim.dispose(); _timer?.cancel(); super.dispose(); }
+  @override
+  void dispose() {
+    _anim.dispose();
+    _timer?.cancel();
+    super.dispose();
+  }
 
   void showNotification({required String title, required String body}) {
     setState(() { _title = title; _body = body; _visible = true; });
@@ -152,28 +140,59 @@ class _InAppNotificationState extends State<InAppNotificationWrapper>
     });
   }
 
-  @override Widget build(BuildContext context) => Stack(children: [
-      widget.child,
-      if (_visible) Positioned(top: 0, left: 0, right: 0,
-  child: SlideTransition(position: _slide,
-  child: SafeArea(child: Padding(padding: const EdgeInsets.all(12),
-  child: Material(elevation: 8, borderRadius: BorderRadius.circular(14),
-  child: Container(padding: const EdgeInsets.all(14),
-  decoration: BoxDecoration(color: kDark, borderRadius: BorderRadius.circular(14)),
-  child: Row(children: [
-  Container(width: 40, height: 40,
-  decoration: const BoxDecoration(color: kGreen, shape: BoxShape.circle),
-  child: const Icon(Icons.notifications, color: Colors.white, size: 20)),
-  const SizedBox(width: 12),
-  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-  Text(_title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-  const SizedBox(height: 2),
-  Text(_body, style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12)),
-  ])),
-  IconButton(icon: const Icon(Icons.close, color: Colors.white54, size: 18),
-  onPressed: () => _anim.reverse().then((_) => setState(() => _visible = false))),
-  ])))))),
-  ]);
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        widget.child,
+        if (_visible)
+          Positioned(
+            top: 0, left: 0, right: 0,
+            child: SlideTransition(
+              position: _slide,
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Material(
+                    elevation: 8,
+                    borderRadius: BorderRadius.circular(14),
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                          color: kDark, borderRadius: BorderRadius.circular(14)),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 40, height: 40,
+                            decoration: const BoxDecoration(color: kGreen, shape: BoxShape.circle),
+                            child: const Icon(Icons.notifications, color: Colors.white, size: 20),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(_title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                                const SizedBox(height: 2),
+                                Text(_body, style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close, color: Colors.white54, size: 18),
+                            onPressed: () => _anim.reverse().then((_) => setState(() => _visible = false)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 Future<Map<String,String>> _authHeaders() async {
@@ -210,7 +229,6 @@ class _SplashScreenState extends State<SplashScreen> {
     if (tripId != null && deviceId != null) {
       Navigator.pushReplacement(context, _route(ActiveRideScreen(tripId: tripId, deviceId: deviceId)));
     } else if (token != null && token.isNotEmpty) {
-      // Login-ის შემდეგ FCM token სერვერზე გაგზავნა
       await PushNotificationService.resendToken();
       Navigator.pushReplacement(context, _route(const MainScreen()));
     } else {
@@ -343,7 +361,7 @@ class _LoginScreenState extends State<LoginScreen> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MAIN SCREEN  [სქროლი | ისტორია | ☰]
+// MAIN SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -363,8 +381,8 @@ class _MainScreenState extends State<MainScreen> {
                 selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                 items: const [
                   BottomNavigationBarItem(icon: Icon(Icons.electric_scooter_outlined), activeIcon: Icon(Icons.electric_scooter), label: 'სქროლი'),
-                  BottomNavigationBarItem(icon: Icon(Icons.history_outlined),           activeIcon: Icon(Icons.history),           label: 'ისტორია'),
-                  BottomNavigationBarItem(icon: Icon(Icons.menu),                        activeIcon: Icon(Icons.menu_open),         label: 'მენიუ'),
+                  BottomNavigationBarItem(icon: Icon(Icons.history_outlined), activeIcon: Icon(Icons.history), label: 'ისტორია'),
+                  BottomNavigationBarItem(icon: Icon(Icons.menu), activeIcon: Icon(Icons.menu_open), label: 'მენიუ'),
                 ])));
   }
 }
@@ -400,7 +418,7 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
   Future<void> _loadData() async {
     try {
       final h = await _authHeaders();
-      final r1 = await http.get(Uri.parse('$BASE_URL/api/scooters'),  headers: h);
+      final r1 = await http.get(Uri.parse('$BASE_URL/api/scooters'), headers: h);
       final d1 = jsonDecode(r1.body); if (d1 is List) setState(() => _scooters = d1);
       final r2 = await http.get(Uri.parse('$BASE_URL/api/geofences'), headers: h);
       final d2 = jsonDecode(r2.body); if (d2 is List) setState(() => _geofences = d2);
@@ -529,7 +547,7 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// QR SCAN (mobile_scanner v5)
+// QR SCAN
 // ─────────────────────────────────────────────────────────────────────────────
 class QRScanScreen extends StatefulWidget {
   const QRScanScreen({super.key});
@@ -552,9 +570,9 @@ class _QRScanScreenState extends State<QRScanScreen> {
         final uri = Uri.parse(v);
         deviceId = uri.queryParameters['id'] ?? uri.queryParameters['device_id'] ?? '';
       }
-      if (deviceId.isEmpty && v.contains('id='))         deviceId = v.split('id=').last.split('&').first.trim();
-      if (deviceId.isEmpty && v.contains('device_id='))  deviceId = v.split('device_id=').last.split('&').first.trim();
-      if (deviceId.isEmpty)                              deviceId = v;
+      if (deviceId.isEmpty && v.contains('id='))        deviceId = v.split('id=').last.split('&').first.trim();
+      if (deviceId.isEmpty && v.contains('device_id=')) deviceId = v.split('device_id=').last.split('&').first.trim();
+      if (deviceId.isEmpty)                             deviceId = v;
     } catch (_) { deviceId = v; }
     if (deviceId.isNotEmpty) {
       Navigator.pushReplacement(context, _route(ScooterDetailScreen(deviceId: deviceId)));
@@ -639,7 +657,7 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
       if (mounted) showDialog(context: context, builder: (_) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Row(children: [Icon(Icons.battery_alert, color: Colors.red), SizedBox(width: 8), Text('ბატარეა ძალიან დაბალია')]),
-          content: Text('სქროლის ბატარეა მხოლოდ $battery% არის.\n\nგაქირავება შეუძლებელია — სქროლი ვერ მიგიყვანს დანიშნულებამდე.'),
+          content: Text('სქროლის ბატარეა მხოლოდ $battery% არის.\n\nგაქირავება შეუძლებელია.'),
           actions: [ElevatedButton(onPressed: ()=>Navigator.pop(context),
               style: ElevatedButton.styleFrom(backgroundColor: kDark),
               child: const Text('გასაგებია', style: TextStyle(color: Colors.white)))]));
@@ -777,14 +795,11 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
           lat = pos.latitude; lng = pos.longitude;
         }
       } catch(_) {}
-
       final h = await _authHeaders();
       final body = <String, dynamic>{'trip_id': widget.tripId, 'device_id': widget.deviceId};
       if (lat != null && lng != null) { body['latitude'] = lat; body['longitude'] = lng; }
-
       final res = await http.post(Uri.parse('$BASE_URL/api/trips/end'), headers: h, body: jsonEncode(body));
       final data = jsonDecode(res.body);
-
       if (data['error'] == 'zone_violation') {
         setState(()=>_ending=false);
         if (mounted) showDialog(context: context, builder: (_) => AlertDialog(
@@ -796,7 +811,6 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                 child: const Text('გავიგე', style: TextStyle(color: Colors.white)))]));
         return;
       }
-
       if (data['success']==true) {
         final prefs = await SharedPreferences.getInstance();
         await prefs.remove('active_trip_id'); await prefs.remove('active_device_id');
@@ -932,15 +946,10 @@ class _MenuScreenState extends State<MenuScreen> {
 
   Future<void> _openUrl(String url) async {
     final uri = Uri.parse(url);
-    try {
-      if (await canLaunchUrl(uri)) { await launchUrl(uri, mode: LaunchMode.externalApplication); return; }
-    } catch (_) {}
+    try { if (await canLaunchUrl(uri)) { await launchUrl(uri, mode: LaunchMode.externalApplication); return; } } catch (_) {}
     try { await launchUrl(uri, mode: LaunchMode.platformDefault); return; } catch (_) {}
     try { await launchUrl(uri, mode: LaunchMode.inAppBrowserView); }
-    catch (_) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('ვერ გაიხსნა — დააკოპირე: +995 568 877 899')));
-    }
+    catch (_) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('ვერ გაიხსნა'))); }
   }
 
   @override Widget build(BuildContext context) => Scaffold(backgroundColor: kBg,
@@ -1030,234 +1039,24 @@ class AccountSettingsScreen extends StatefulWidget {
   @override State<AccountSettingsScreen> createState() => _AccountSettingsScreenState();
 }
 class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
-  String _username='', _email='', _photoUrl=''; bool _verified=false;
-  @override void initState() { super.initState(); _load(); }
-  Future<void> _load() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() { _username=prefs.getString('username')??'—'; _email=prefs.getString('email')??'';
-    _photoUrl=prefs.getString('photo_url')??''; _verified=prefs.getBool('verified')??false; });
-  }
-  @override Widget build(BuildContext context) => Scaffold(backgroundColor: kBg,
-      appBar: AppBar(backgroundColor: kDark,
-          title: const Text('Account & Settings',style:TextStyle(color:Colors.white)),
-          leading: IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
-      body: SingleChildScrollView(padding: const EdgeInsets.all(20), child: Column(children: [
-        Container(padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(20),boxShadow:[BoxShadow(color:Colors.black.withOpacity(0.05),blurRadius:10)]),
-            child: Column(children: [
-              _photoUrl.isNotEmpty
-                  ? CircleAvatar(radius:44,backgroundImage:NetworkImage(_photoUrl),onBackgroundImageError:(_,__)  {})
-                  : Container(width:88,height:88,decoration:const BoxDecoration(gradient:LinearGradient(colors:[kGreen,kOrange]),shape:BoxShape.circle),
-                  child:const Icon(Icons.person,size:44,color:Colors.white)),
-              const SizedBox(height:14),
-              Text(_username,style:const TextStyle(fontSize:22,fontWeight:FontWeight.bold,color:kDark)),
-              if (_email.isNotEmpty)...[const SizedBox(height:4),Text(_email,style:TextStyle(color:Colors.grey[500],fontSize:13))],
-              const SizedBox(height:10),
-              Container(padding:const EdgeInsets.symmetric(horizontal:14,vertical:5),
-                  decoration:BoxDecoration(color:_verified?kGreen.withOpacity(0.1):Colors.yellow.withOpacity(0.15),borderRadius:BorderRadius.circular(20)),
-                  child:Text(_verified?'✅ Verified':'⚠️ Unverified',
-                      style:TextStyle(color:_verified?kGreen:Colors.yellow[800],fontWeight:FontWeight.w600)))])),
-        const SizedBox(height:20),
-        if (!_verified) Container(padding:const EdgeInsets.all(16),
-            decoration:BoxDecoration(color:Colors.yellow.withOpacity(0.08),borderRadius:BorderRadius.circular(14),border:Border.all(color:Colors.yellow.withOpacity(0.3))),
-            child:const Row(children:[Icon(Icons.warning_amber,color:Colors.orange),SizedBox(width:12),
-              Expanded(child:Text('ანგარიშის ვერიფიკაციისთვის დაუკავშირდი მხარდაჭერას',style:TextStyle(fontSize:13,color:kDark)))])),
-        const SizedBox(height:16),
-        Container(decoration:BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(16),boxShadow:[BoxShadow(color:Colors.black.withOpacity(0.04),blurRadius:8)]),
-            child:Column(children:[
-              _iRow(Icons.person,'სახელი',_username),
-              const Divider(height:1,indent:56),
-              _iRow(Icons.email_outlined,'ელ-ფოსტა',_email.isNotEmpty?_email:'—')])),
-      ])));
-
-  Widget _iRow(IconData icon, String label, String value) => ListTile(
-      leading: Icon(icon,color:kGreen,size:22),
-      title: Text(label,style:TextStyle(color:Colors.grey[500],fontSize:12)),
-      subtitle: Text(value,style:const TextStyle(color:kDark,fontWeight:FontWeight.w500,fontSize:15)));
+String _username='', _email='', _photoUrl=''; bool _verified=false;
+@override void initState() { super.initState(); _load(); }
+Future<void> _load() async {
+final prefs = await SharedPreferences.getInstance();
+setState(() { _username=prefs.getString('username')??'—'; _email=prefs.getString('email')??'';
+_photoUrl=prefs.getString('photo_url')??''; _verified=prefs.getBool('verified')??false; });
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CARD SCREEN
-// ─────────────────────────────────────────────────────────────────────────────
-class CardScreen extends StatefulWidget {
-  const CardScreen({super.key});
-  @override State<CardScreen> createState() => _CardScreenState();
-}
-class _CardScreenState extends State<CardScreen> {
-  bool _loading=false, _hasCard=false; Map? _cardInfo;
-  @override void initState() { super.initState(); _loadCard(); }
-  Future<void> _loadCard() async {
-    setState(()=>_loading=true);
-    try {
-      final h = await _authHeaders();
-      final res = await http.get(Uri.parse('$BASE_URL/api/user/card-status'), headers: h);
-      final d = jsonDecode(res.body);
-      if (mounted) setState(() { _hasCard=d['has_card']==true; _cardInfo=d['card']; });
-    } catch (_) {}
-    setState(()=>_loading=false);
-  }
-  Future<void> _addCard() async {
-    setState(()=>_loading=true);
-    try {
-      final h = await _authHeaders();
-      final res = await http.post(Uri.parse('$BASE_URL/api/bog/save-card'), headers: h,
-          body: jsonEncode({'return_url': '$BASE_URL/card-success'}));
-      final d = jsonDecode(res.body);
-      if (d['redirect_url']!=null) { final uri=Uri.parse(d['redirect_url'] as String); if (await canLaunchUrl(uri)) await launchUrl(uri,mode:LaunchMode.externalApplication); }
-      else { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('სერვერის შეცდომა'))); }
-    } catch (_) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('კავშირის შეცდომა'))); }
-    setState(()=>_loading=false);
-  }
-  Future<void> _removeCard() async {
-    final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
-        title: const Text('ბარათის წაშლა'), content: const Text('დარწმუნებული ხარ?'),
-        actions: [TextButton(onPressed:()=>Navigator.pop(context,false),child:const Text('გაუქმება')),
-          ElevatedButton(onPressed:()=>Navigator.pop(context,true),style:ElevatedButton.styleFrom(backgroundColor:Colors.red),
-              child:const Text('წაშლა',style:TextStyle(color:Colors.white)))]));
-    if (ok!=true) return;
-    setState(()=>_loading=true);
-    try {
-      final h = await _authHeaders();
-      await http.delete(Uri.parse('$BASE_URL/api/user/card'), headers: h);
-      final prefs = await SharedPreferences.getInstance(); await prefs.setBool('has_card',false);
-      await _loadCard();
-    } catch (_) {}
-    setState(()=>_loading=false);
-  }
-  @override Widget build(BuildContext context) => Scaffold(backgroundColor: kBg,
-      appBar: AppBar(backgroundColor: kDark,
-          title: const Text('Wallet & Payments',style:TextStyle(color:Colors.white)),
-          leading: IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
-      body: _loading?const Center(child:CircularProgressIndicator(color:kGreen))
-          :Padding(padding:const EdgeInsets.all(20),child:Column(children:[
-        Container(width:double.infinity,height:190,
-            decoration:BoxDecoration(gradient:const LinearGradient(colors:[kDark,Color(0xFF2E4D3A)],begin:Alignment.topLeft,end:Alignment.bottomRight),
-                borderRadius:BorderRadius.circular(20),boxShadow:[BoxShadow(color:kDark.withOpacity(0.35),blurRadius:20,offset:const Offset(0,8))]),
-            padding:const EdgeInsets.all(24),
-            child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-              Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
-                const Text('VELOCAR',style:TextStyle(color:Colors.white,fontSize:18,fontWeight:FontWeight.bold,letterSpacing:2)),
-                Icon(_hasCard?Icons.credit_card:Icons.credit_card_off,color:Colors.white.withOpacity(0.6),size:28)]),
-              const Spacer(),
-              Text(_hasCard&&_cardInfo?['masked_number']!=null?_cardInfo!['masked_number']:'•••• •••• •••• ••••',
-                  style:TextStyle(color:Colors.white.withOpacity(0.9),fontSize:20,letterSpacing:4,fontWeight:FontWeight.w300)),
-              const SizedBox(height:16),
-              Row(children:[
-                Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-                  Text('CARDHOLDER',style:TextStyle(color:Colors.white.withOpacity(0.4),fontSize:10,letterSpacing:1)),
-                  const SizedBox(height:2),
-                  Text(_hasCard?(_cardInfo?['holder']??'Velocar User'):'—',style:const TextStyle(color:Colors.white,fontSize:14,fontWeight:FontWeight.w500))]),
-                const Spacer(),
-                if (_hasCard&&_cardInfo?['expiry']!=null) Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-                  Text('EXPIRES',style:TextStyle(color:Colors.white.withOpacity(0.4),fontSize:10,letterSpacing:1)),
-                  const SizedBox(height:2),
-                  Text(_cardInfo!['expiry'],style:const TextStyle(color:Colors.white,fontSize:14,fontWeight:FontWeight.w500))])])])),
-        const SizedBox(height:20),
-        Container(padding:const EdgeInsets.all(16),
-            decoration:BoxDecoration(color:_hasCard?kGreen.withOpacity(0.08):Colors.orange.withOpacity(0.08),borderRadius:BorderRadius.circular(14),border:Border.all(color:_hasCard?kGreen.withOpacity(0.2):kOrange.withOpacity(0.2))),
-            child:Row(children:[Icon(_hasCard?Icons.check_circle:Icons.info_outline,color:_hasCard?kGreen:kOrange),const SizedBox(width:12),
-              Expanded(child:Text(_hasCard?'ბარათი მიბმულია. გაქირავება ავტომატურად ჩამოეჭრება.':'ბარათი არ არის მიბმული.',
-                  style:TextStyle(color:_hasCard?kGreen:kOrange,fontSize:13)))])),
-        const SizedBox(height:20),
-        SizedBox(width:double.infinity,height:54,
-            child:ElevatedButton.icon(icon:Icon(_hasCard?Icons.edit:Icons.add_card,color:Colors.white),
-                label:Text(_hasCard?'ბარათის შეცვლა':'ბარათის დამატება (BOG)',style:const TextStyle(fontSize:16,fontWeight:FontWeight.bold,color:Colors.white)),
-                style:ElevatedButton.styleFrom(backgroundColor:kGreen,shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(14))),
-                onPressed:_addCard)),
-        if (_hasCard)...[const SizedBox(height:12),
-          SizedBox(width:double.infinity,height:48,
-              child:OutlinedButton.icon(icon:const Icon(Icons.delete_outline,color:Colors.red),
-                  label:const Text('ბარათის წაშლა',style:TextStyle(color:Colors.red,fontWeight:FontWeight.w600)),
-                  style:OutlinedButton.styleFrom(side:const BorderSide(color:Colors.red),shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(14))),
-                  onPressed:_removeCard))],
-        const Spacer(),
-        Text('გადახდა უზრუნველყოფილია Bank of Georgia-ს მიერ',style:TextStyle(color:Colors.grey[400],fontSize:12)),
-      ])));
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// FAQ
-// ─────────────────────────────────────────────────────────────────────────────
-class FaqScreen extends StatelessWidget {
-  const FaqScreen({super.key});
-  static const _faqs = [
-    ('როგორ დავიწყო გაქირავება?',    'გახსენი აპი, დააჭირე სქროლის სკანირება და დაასკანირე სქროლზე არსებული QR კოდი.'),
-    ('რა ღირს გაქირავება?',          '₾0.15 წუთში. პირველი წუთი უფასოა.'),
-    ('სად შემიძლია სქროლის დატოვება?','სქროლი დატოვე მწვანე ზონაში — რუკაზე ნაჩვენები სერვის არეალი.'),
-    ('ბატარეა გამოილია — რა ვქნა?',  'სქროლი მაინც შეაჩერე აპიდან. დაგვიკავშირდი Live Chat-ის გზით.'),
-    ('გადახდა ვერ მოხდა — რა ვქნა?', 'შეამოწმე ბარათი Wallet & Payments-ში. BOG ბარათი უნდა იყოს მიბმული.'),
-    ('მოგზაურობა ვერ ვხედავ?',        'ისტორია ტაბზე ნახავ ყველა მოგზაურობას. პრობლემის შემთხვევაში Live Chat-ზე გვწერე.'),
-  ];
-  @override Widget build(BuildContext context) => Scaffold(backgroundColor: kBg,
-      appBar: AppBar(backgroundColor:kDark, title:const Text('FAQ',style:TextStyle(color:Colors.white)),
-          leading:IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
-      body: ListView.builder(padding:const EdgeInsets.all(16),itemCount:_faqs.length,itemBuilder:(_,i){
-        final (q,a) = _faqs[i];
-        return Container(margin:const EdgeInsets.only(bottom:12),
-            decoration:BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(14),boxShadow:[BoxShadow(color:Colors.black.withOpacity(0.04),blurRadius:8)]),
-            child:ExpansionTile(
-                leading:Container(width:32,height:32,decoration:BoxDecoration(color:kGreen.withOpacity(0.1),shape:BoxShape.circle),child:const Icon(Icons.help_outline,color:kGreen,size:18)),
-                title:Text(q,style:const TextStyle(fontWeight:FontWeight.w600,color:kDark,fontSize:14)),
-                children:[Padding(padding:const EdgeInsets.fromLTRB(16,0,16,16),
-                    child:Text(a,style:TextStyle(color:Colors.grey[600],fontSize:13,height:1.5)))]));
-      }));
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SAFETY
-// ─────────────────────────────────────────────────────────────────────────────
-class SafetyScreen extends StatelessWidget {
-  const SafetyScreen({super.key});
-  static const _rules = [
-    (Icons.security,          'ჩაფხუტი',       'გამოიყენე ჩაფხუტი სიარულის დროს.'),
-    (Icons.speed,             'სიჩქარე',        'ქალაქში მაქსიმუმ 25 კმ/სთ.'),
-    (Icons.no_drinks,         'ალკოჰოლი',       'ალკოჰოლის ზემოქმედებით სიარული მკაცრად აკრძალულია.'),
-    (Icons.people,            'ერთი მგზავრი',   'სქროლზე ერთი ადამიანი იჯდება.'),
-    (Icons.phone_android,     'ტელეფონი',       'სიარულის დროს ტელეფონის გამოყენება საშიშია.'),
-    (Icons.park,              'ქვეითთა ბილიკი', 'ქვეითთა ბილიკებზე სიარული აკრძალულია.'),
-  ];
-  @override Widget build(BuildContext context) => Scaffold(backgroundColor:kBg,
-      appBar:AppBar(backgroundColor:kDark,title:const Text('Safety',style:TextStyle(color:Colors.white)),
-          leading:IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
-      body:ListView(padding:const EdgeInsets.all(16),children:[
-        Container(padding:const EdgeInsets.all(16),margin:const EdgeInsets.only(bottom:16),
-            decoration:BoxDecoration(color:kGreen.withOpacity(0.08),borderRadius:BorderRadius.circular(14),border:Border.all(color:kGreen.withOpacity(0.2))),
-            child:const Row(children:[Icon(Icons.shield,color:kGreen),SizedBox(width:12),
-              Expanded(child:Text('შენი უსაფრთხოება ჩვენთვის პრიორიტეტია.',style:TextStyle(color:kGreen,fontWeight:FontWeight.w600)))])),
-        ..._rules.map((r){final(icon,title,desc)=r; return Container(margin:const EdgeInsets.only(bottom:10),padding:const EdgeInsets.all(16),
-            decoration:BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(14),boxShadow:[BoxShadow(color:Colors.black.withOpacity(0.04),blurRadius:8)]),
-            child:Row(children:[Container(width:44,height:44,decoration:BoxDecoration(color:kGreen.withOpacity(0.1),shape:BoxShape.circle),child:Icon(icon,color:kGreen,size:22)),
-              const SizedBox(width:14),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-                Text(title,style:const TextStyle(fontWeight:FontWeight.bold,color:kDark)),const SizedBox(height:2),
-                Text(desc,style:TextStyle(color:Colors.grey[600],fontSize:13))]))]));})
-      ]));
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// HOW TO RIDE
-// ─────────────────────────────────────────────────────────────────────────────
-class HowToRideScreen extends StatelessWidget {
-  const HowToRideScreen({super.key});
-  static const _steps = [
-    (Icons.download_done,        'აპის გახსნა',      'გახსენი Velocar და შედი შენი ანგარიშით.'),
-    (Icons.qr_code_scanner,      'QR სკანირება',     'სქროლთან მიახლოვდი და დაასკანირე QR კოდი.'),
-    (Icons.payment,              'გადახდა',          'BOG ბარათით გაიარე გადახდა. სქროლი იხსნება.'),
-    (Icons.electric_scooter,     'სიარული',          'გამოიყენე სქროლი. ყურადღება მიმოქცევაზე!'),
-    (Icons.location_on,          'სერვის ზონა',      'დარჩი მწვანე ზონაში — გარეთ გასვლა დაუშვებელია.'),
-    (Icons.stop_circle_outlined, 'დასრულება',        'ჩააპარკე სქროლი სწორ ადგილას და დაასრულე გაქირავება.'),
-  ];
-  @override Widget build(BuildContext context) => Scaffold(backgroundColor:kBg,
-      appBar:AppBar(backgroundColor:kDark,title:const Text('How to Ride',style:TextStyle(color:Colors.white)),
-          leading:IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
-      body:ListView.builder(padding:const EdgeInsets.all(16),itemCount:_steps.length,itemBuilder:(_,i){
-        final(icon,title,desc)=_steps[i];
-        return Row(crossAxisAlignment:CrossAxisAlignment.start,children:[
-          Column(children:[Container(width:44,height:44,decoration:const BoxDecoration(color:kGreen,shape:BoxShape.circle),
-              child:Center(child:Icon(icon,color:Colors.white,size:22))),
-            if(i<_steps.length-1)Container(width:2,height:40,color:kGreen.withOpacity(0.2))]),
-          const SizedBox(width:16),
-          Expanded(child:Padding(padding:const EdgeInsets.only(bottom:24),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-            const SizedBox(height:10),Text(title,style:const TextStyle(fontWeight:FontWeight.bold,color:kDark,fontSize:15)),
-            const SizedBox(height:4),Text(desc,style:TextStyle(color:Colors.grey[600],fontSize:13,height:1.5))])))]);
-      }));
-}
+@override Widget build(BuildContext context) => Scaffold(backgroundColor: kBg,
+appBar: AppBar(backgroundColor: kDark,
+title: const Text('Account & Settings',style:TextStyle(color:Colors.white)),
+leading: IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
+body: SingleChildScrollView(padding: const EdgeInsets.all(20), child: Column(children: [
+Container(padding: const EdgeInsets.all(24),
+decoration: BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(20),boxShadow:[BoxShadow(color:Colors.black.withOpacity(0.05),blurRadius:10)]),
+child: Column(children: [
+_photoUrl.isNotEmpty
+? CircleAvatar(radius:44,backgroundImage:NetworkImage(_photoUrl),onBackgroundImageError:(_,__)  {})
+: Container(width:88,height:88,decoration:const BoxDecoration(gradient:LinearGradient(colors:[kGreen,kOrange]),shape:BoxShape.circle),
+child:const Icon(Icons.person,size:44,color:Colors.white)),
+const SizedBox(height:14),
+Text(_username,style:const TextStyle(fontSize:22,fontWeight:FontWeight.bold,color:kDark
