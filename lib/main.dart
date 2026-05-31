@@ -1088,7 +1088,7 @@ const SizedBox(height:16),
 Row(
 class FaqScreen extends StatelessWidget {
 const FaqScreen({super.key});
-static const _faqs = [
+static final _faqs = [
 ('როგორ დავიწყო გაქირავება?',    'გახსენი აპი, დააჭირე სქროლის სკანირება და დაასკანირე სქროლზე არსებული QR კოდი.'),
 ('რა ღირს გაქირავება?',          '₾0.15 წუთში. პირველი წუთი უფასოა.'),
 ('სად შემიძლია სქროლის დატოვება?','სქროლი დატოვე მწვანე ზონაში — რუკაზე ნაჩვენები სერვის არეალი.'),
@@ -1113,7 +1113,7 @@ child:Text(a,style:TextStyle(color:Colors.grey[600],fontSize:13,height:1.5)))]))
 
 class SafetyScreen extends StatelessWidget {
 const SafetyScreen({super.key});
-static const _rules = [
+static final _rules = [
 (Icons.security,      'ჩაფხუტი',       'გამოიყენე ჩაფხუტი სიარულის დროს.'),
 (Icons.speed,         'სიჩქარე',        'ქალაქში მაქსიმუმ 25 კმ/სთ.'),
 (Icons.no_drinks,     'ალკოჰოლი',       'ალკოჰოლის ზემოქმედებით სიარული მკაცრად აკრძალულია.'),
@@ -1129,7 +1129,7 @@ Container(padding:const EdgeInsets.all(16),margin:const EdgeInsets.only(bottom:1
 decoration:BoxDecoration(color:kGreen.withOpacity(0.08),borderRadius:BorderRadius.circular(14),border:Border.all(color:kGreen.withOpacity(0.2))),
 child:const Row(children:[Icon(Icons.shield,color:kGreen),SizedBox(width:12),
 Expanded(child:Text('შენი უსაფრთხოება ჩვენთვის პრიორიტეტია.',style:TextStyle(color:kGreen,fontWeight:FontWeight.w600)))])),
-..._rules.map((r){final(icon,title,desc)=r; return Container(margin:const EdgeInsets.only(bottom:10),padding:const EdgeInsets.all(16),
+..._rules.map((r){final icon=r.$1; final title=r.$2; final desc=r.$3; return Container(margin:const EdgeInsets.only(bottom:10),padding:const EdgeInsets.all(16),
 decoration:BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(14),boxShadow:[BoxShadow(color:Colors.black.withOpacity(0.04),blurRadius:8)]),
 child:Row(children:[Container(width:44,height:44,decoration:BoxDecoration(color:kGreen.withOpacity(0.1),shape:BoxShape.circle),child:Icon(icon,color:kGreen,size:22)),
 const SizedBox(width:14),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
@@ -1140,7 +1140,7 @@ Text(desc,style:TextStyle(color:Colors.grey[600],fontSize:13))]))]));})
 
 class HowToRideScreen extends StatelessWidget {
 const HowToRideScreen({super.key});
-static const _steps = [
+static final _steps = [
 (Icons.download_done,        'აპის გახსნა',   'გახსენი Velocar და შედი შენი ანგარიშით.'),
 (Icons.qr_code_scanner,      'QR სკანირება',  'სქროლთან მიახლოვდი და დაასკანირე QR კოდი.'),
 (Icons.payment,              'გადახდა',       'BOG ბარათით გაიარე გადახდა. სქროლი იხსნება.'),
@@ -1152,7 +1152,8 @@ static const _steps = [
 appBar:AppBar(backgroundColor:kDark,title:const Text('How to Ride',style:TextStyle(color:Colors.white)),
 leading:IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
 body:ListView.builder(padding:const EdgeInsets.all(16),itemCount:_steps.length,itemBuilder:(_,i){
-final(icon,title,desc)=_steps[i];
+final step=_steps[i];
+final icon=step.$1; final title=step.$2; final desc=step.$3;
 return Row(crossAxisAlignment:CrossAxisAlignment.start,children:[
 Column(children:[Container(width:44,height:44,decoration:const BoxDecoration(color:kGreen,shape:BoxShape.circle),
 child:Center(child:Icon(icon,color:Colors.white,size:22))),
