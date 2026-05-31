@@ -276,7 +276,7 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
   @override Widget build(BuildContext context) => Scaffold(body: Stack(children: [
     FlutterMap(mapController: _mapCtrl, options: MapOptions(initialCenter: _center, initialZoom: 14),
         children: [
-          TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.velocar.app'),
+          TileLayer(urlTemplate: 'https://tile.mt0.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', userAgentPackageName: 'com.velocar.app'),
           PolygonLayer(polygons: _geofences.map((g) { final pts = _parseGeofence(g); if (pts.isEmpty) return null;
           return Polygon(points: pts, color: kGreen.withOpacity(0.15), borderColor: kGreen, borderStrokeWidth: 2);
           }).whereType<Polygon>().toList()),
