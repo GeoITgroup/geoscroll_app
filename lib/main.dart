@@ -410,10 +410,10 @@ class _OverlayPainter extends CustomPainter {
     const box = 240.0;
     final cx = size.width/2, cy = size.height/2;
     final rect = Rect.fromCenter(center: Offset(cx,cy), width: box, height: box);
-    canvas.drawPath(Path.combine(PathOperation.difference,
-        Path()..addRect(Rect.fromLTWH(0,0,size.width,size.height)),
-        Path()..addRRect(RRect.fromRectAndRadius(rect, const Radius.circular(16)))),
-        Paint()..color = Colors.black.withOpacity(0.55));
+    final overlayPath = Path()..addRect(Rect.fromLTWH(0,0,size.width,size.height));
+    final holePath = Path()..addRRect(RRect.fromRectAndRadius(rect, const Radius.circular(16)));
+    final combined = Path.combine(PathOperation.difference, overlayPath, holePath);
+    canvas.drawPath(combined, Paint()..color = Colors.black.withOpacity(0.55));
     final bp = Paint()..color = kGreen..strokeWidth = 3..style = PaintingStyle.stroke;
     const cs = 28.0;
     final l=rect.left,t=rect.top,r=rect.right,b=rect.bottom;
@@ -1006,9 +1006,9 @@ class _CardScreenState extends State<CardScreen> {
 class FaqScreen extends StatelessWidget {
 const FaqScreen({super.key});
 static const _faqs = [
-('როგორ დავიწყო გაქირავება?',    'გახსენი აპი, დააჭირე "სქროლის სკანირება" და დაასკანირე სქროლზე არსებული QR კოდი.'),
+('როგორ დავიწყო გაქირავება?',    'გახსენი აპი, დააჭირე სქროლის სკანირება და დაასკანირე სქროლზე არსებული QR კოდი.'),
 ('რა ღირს გაქირავება?',          '₾0.15 წუთში. პირველი წუთი უფასოა.'),
 ('სად შემიძლია სქროლის დატოვება?','სქროლი დატოვე მწვანე ზონაში — რუკაზე ნაჩვენები სერვის არეალი.'),
 ('ბატარეა გამოილია — რა ვქნა?',  'სქროლი მაინც შეაჩერე აპიდან. დაგვიკავშირდი Live Chat-ის გზით.'),
 ('გადახდა ვერ მოხდა — რა ვქნა?', 'შეამოწმე ბარათი Wallet & Payments-ში. BOG ბარათი უნდა იყოს მიბმული.'),
-('მოგზაურობა ვერ ვხედავ?',        'ისტორია ტაბზე ნახავ ყველა მოგზაურობას. პრობლემის შემთხვევაში Li
+('მოგზაურობა ვერ ვხედავ?',        'ისტორია ტაბზე ნახავ ყველა მოგზაურობას. პრობლემის შემთხვევაში Live Chat-ზე გვწერე.'),
