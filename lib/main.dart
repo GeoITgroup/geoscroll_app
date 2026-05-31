@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' hide Path;
+import 'dart:ui' as ui;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -410,9 +412,9 @@ class _OverlayPainter extends CustomPainter {
     const box = 240.0;
     final cx = size.width/2, cy = size.height/2;
     final rect = Rect.fromCenter(center: Offset(cx,cy), width: box, height: box);
-    final overlayPath = Path()..addRect(Rect.fromLTWH(0,0,size.width,size.height));
-    final holePath = Path()..addRRect(RRect.fromRectAndRadius(rect, const Radius.circular(16)));
-    final combined = Path.combine(PathOperation.difference, overlayPath, holePath);
+    final overlayPath = ui.Path()..addRect(Rect.fromLTWH(0,0,size.width,size.height));
+    final holePath = ui.Path()..addRRect(RRect.fromRectAndRadius(rect, const Radius.circular(16)));
+    final combined = ui.Path.combine(ui.PathOperation.difference, overlayPath, holePath);
     canvas.drawPath(combined, Paint()..color = Colors.black.withOpacity(0.55));
     final bp = Paint()..color = kGreen..strokeWidth = 3..style = PaintingStyle.stroke;
     const cs = 28.0;
