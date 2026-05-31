@@ -801,11 +801,11 @@ class _MenuScreenState extends State<MenuScreen> {
           _div(),
           _tile(Icons.chat_bubble_outline,      'Live Chat',      onTap: () => _openUrl('https://wa.me/995000000000')),
           _div(),
-          _tile(Icons.help_outline,             'FAQ',            onTap: () => Navigator.push(context, _route(const FaqScreen()))),
+          _tile(Icons.help_outline,             'FAQ',            onTap: () => Navigator.push(context, _route(FaqScreen()))),
           _div(),
-          _tile(Icons.shield_outlined,          'Safety',         onTap: () => Navigator.push(context, _route(const SafetyScreen()))),
+          _tile(Icons.shield_outlined,          'Safety',         onTap: () => Navigator.push(context, _route(SafetyScreen()))),
           _div(),
-          _tile(Icons.directions_bike_outlined, 'How to Ride',    onTap: () => Navigator.push(context, _route(const HowToRideScreen()))),
+          _tile(Icons.directions_bike_outlined, 'How to Ride',    onTap: () => Navigator.push(context, _route(HowToRideScreen()))),
         ]),
 
         const SizedBox(height: 12),
@@ -919,7 +919,7 @@ class _CardScreenState extends State<CardScreen> {
       final h = await _authHeaders();
       final res = await http.get(Uri.parse('$BASE_URL/api/user/card-status'), headers: h);
       final d = jsonDecode(res.body);
-      setState(()=>{ _hasCard=d['has_card']==true; _cardInfo=d['card']; });
+      if (mounted) setState(() { _hasCard=d['has_card']==true; _cardInfo=d['card']; });
     } catch (_) {}
     setState(()=>_loading=false);
   }
@@ -1006,11 +1006,84 @@ class _CardScreenState extends State<CardScreen> {
 // FAQ
 // ─────────────────────────────────────────────────────────────────────────────
 class FaqScreen extends StatelessWidget {
-const FaqScreen({super.key});
-static const _faqs = [
-('როგორ დავიწყო გაქირავება?',    'გახსენი აპი, დააჭირე სქროლის სკანირება და დაასკანირე სქროლზე არსებული QR კოდი.'),
-('რა ღირს გაქირავება?',          '₾0.15 წუთში. პირველი წუთი უფასოა.'),
-('სად შემიძლია სქროლის დატოვება?','სქროლი დატოვე მწვანე ზონაში — რუკაზე ნაჩვენები სერვის არეალი.'),
-('ბატარეა გამოილია — რა ვქნა?',  'სქროლი მაინც შეაჩერე აპიდან. დაგვიკავშირდი Live Chat-ის გზით.'),
-('გადახდა ვერ მოხდა — რა ვქნა?', 'შეამოწმე ბარათი Wallet & Payments-ში. BOG ბარათი უნდა იყოს მიბმული.'),
-('მოგზაურობა ვერ ვხედავ?',        'ისტორია ტაბზე ნახავ ყველა მოგზაურობას. პრობლემის შემთხვევაში Live Chat-ზე გვწერე.'),
+  const FaqScreen({super.key});
+  static const _faqs = [
+    ('როგორ დავიწყო გაქირავება?',    'გახსენი აპი, დააჭირე სქროლის სკანირება და დაასკანირე სქროლზე არსებული QR კოდი.'),
+    ('რა ღირს გაქირავება?',          '₾0.15 წუთში. პირველი წუთი უფასოა.'),
+    ('სად შემიძლია სქროლის დატოვება?','სქროლი დატოვე მწვანე ზონაში — რუკაზე ნაჩვენები სერვის არეალი.'),
+    ('ბატარეა გამოილია — რა ვქნა?',  'სქროლი მაინც შეაჩერე აპიდან. დაგვიკავშირდი Live Chat-ის გზით.'),
+    ('გადახდა ვერ მოხდა — რა ვქნა?', 'შეამოწმე ბარათი Wallet & Payments-ში. BOG ბარათი უნდა იყოს მიბმული.'),
+    ('მოგზაურობა ვერ ვხედავ?',        'ისტორია ტაბზე ნახავ ყველა მოგზაურობას. პრობლემის შემთხვევაში Live Chat-ზე გვწერე.'),  ];
+  @override Widget build(BuildContext context) => Scaffold(backgroundColor: kBg,
+      appBar: AppBar(backgroundColor:kDark, title:const Text('FAQ',style:TextStyle(color:Colors.white)),
+          leading:IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
+      body: ListView.builder(padding:const EdgeInsets.all(16),itemCount:_faqs.length,itemBuilder:(_,i){
+        final (q,a) = _faqs[i];
+        return Container(margin:const EdgeInsets.only(bottom:12),
+            decoration:BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(14),boxShadow:[BoxShadow(color:Colors.black.withOpacity(0.04),blurRadius:8)]),
+            child:ExpansionTile(
+                leading:Container(width:32,height:32,decoration:BoxDecoration(color:kGreen.withOpacity(0.1),shape:BoxShape.circle),child:const Icon(Icons.help_outline,color:kGreen,size:18)),
+                title:Text(q,style:const TextStyle(fontWeight:FontWeight.w600,color:kDark,fontSize:14)),
+                children:[Padding(padding:const EdgeInsets.fromLTRB(16,0,16,16),
+                    child:Text(a,style:TextStyle(color:Colors.grey[600],fontSize:13,height:1.5)))]));
+      }));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SAFETY
+// ─────────────────────────────────────────────────────────────────────────────
+class SafetyScreen extends StatelessWidget {
+  const SafetyScreen({super.key});
+  static const _rules = [
+    (Icons.security,          'ჩაფხუტი',       'გამოიყენე ჩაფხუტი სიარულის დროს.'),
+    (Icons.speed,             'სიჩქარე',        'ქალაქში მაქსიმუმ 25 კმ/სთ.'),
+    (Icons.no_drinks,         'ალკოჰოლი',       'ალკოჰოლის ზემოქმედებით სიარული მკაცრად აკრძალულია.'),
+    (Icons.people,            'ერთი მგზავრი',   'სქროლზე ერთი ადამიანი იჯდება.'),
+    (Icons.phone_android,     'ტელეფონი',       'სიარულის დროს ტელეფონის გამოყენება საშიშია.'),
+    (Icons.park,              'ქვეითთა ბილიკი', 'ქვეითთა ბილიკებზე სიარული აკრძალულია.'),
+  ];
+  @override Widget build(BuildContext context) => Scaffold(backgroundColor:kBg,
+      appBar:AppBar(backgroundColor:kDark,title:const Text('Safety',style:TextStyle(color:Colors.white)),
+          leading:IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
+      body:ListView(padding:const EdgeInsets.all(16),children:[
+        Container(padding:const EdgeInsets.all(16),margin:const EdgeInsets.only(bottom:16),
+            decoration:BoxDecoration(color:kGreen.withOpacity(0.08),borderRadius:BorderRadius.circular(14),border:Border.all(color:kGreen.withOpacity(0.2))),
+            child:const Row(children:[Icon(Icons.shield,color:kGreen),SizedBox(width:12),
+              Expanded(child:Text('შენი უსაფრთხოება ჩვენთვის პრიორიტეტია.',style:TextStyle(color:kGreen,fontWeight:FontWeight.w600)))])),
+        ..._rules.map((r){final(icon,title,desc)=r; return Container(margin:const EdgeInsets.only(bottom:10),padding:const EdgeInsets.all(16),
+            decoration:BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(14),boxShadow:[BoxShadow(color:Colors.black.withOpacity(0.04),blurRadius:8)]),
+            child:Row(children:[Container(width:44,height:44,decoration:BoxDecoration(color:kGreen.withOpacity(0.1),shape:BoxShape.circle),child:Icon(icon,color:kGreen,size:22)),
+              const SizedBox(width:14),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+                Text(title,style:const TextStyle(fontWeight:FontWeight.bold,color:kDark)),const SizedBox(height:2),
+                Text(desc,style:TextStyle(color:Colors.grey[600],fontSize:13))]))]));})
+      ]));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HOW TO RIDE
+// ─────────────────────────────────────────────────────────────────────────────
+class HowToRideScreen extends StatelessWidget {
+  const HowToRideScreen({super.key});
+  static const _steps = [
+    (Icons.download_done,        'აპის გახსნა',      'გახსენი Velocar და შედი შენი ანგარიშით.'),
+    (Icons.qr_code_scanner,      'QR სკანირება',     'სქროლთან მიახლოვდი და დაასკანირე QR კოდი.'),
+    (Icons.payment,              'გადახდა',          'BOG ბარათით გაიარე გადახდა. სქროლი იხსნება.'),
+    (Icons.electric_scooter,     'სიარული',          'გამოიყენე სქროლი. ყურადღება მიმოქცევაზე!'),
+    (Icons.location_on,          'სერვის ზონა',      'დარჩი მწვანე ზონაში — გარეთ გასვლა დაუშვებელია.'),
+    (Icons.stop_circle_outlined, 'დასრულება',        'ჩააპარკე სქროლი სწორ ადგილას და დაასრულე გაქირავება.'),
+  ];
+  @override Widget build(BuildContext context) => Scaffold(backgroundColor:kBg,
+      appBar:AppBar(backgroundColor:kDark,title:const Text('How to Ride',style:TextStyle(color:Colors.white)),
+          leading:IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
+      body:ListView.builder(padding:const EdgeInsets.all(16),itemCount:_steps.length,itemBuilder:(_,i){
+        final(icon,title,desc)=_steps[i];
+        return Row(crossAxisAlignment:CrossAxisAlignment.start,children:[
+          Column(children:[Container(width:44,height:44,decoration:const BoxDecoration(color:kGreen,shape:BoxShape.circle),
+              child:Center(child:Icon(icon,color:Colors.white,size:22))),
+            if(i<_steps.length-1)Container(width:2,height:40,color:kGreen.withOpacity(0.2))]),
+          const SizedBox(width:16),
+          Expanded(child:Padding(padding:const EdgeInsets.only(bottom:24),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+            const SizedBox(height:10),Text(title,style:const TextStyle(fontWeight:FontWeight.bold,color:kDark,fontSize:15)),
+            const SizedBox(height:4),Text(desc,style:TextStyle(color:Colors.grey[600],fontSize:13,height:1.5))])))]);
+      }));
+}
