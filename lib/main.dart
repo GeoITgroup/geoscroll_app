@@ -851,7 +851,7 @@ class _MenuScreenState extends State<MenuScreen> {
         _section([
           _tile(Icons.privacy_tip_outlined,     'Privacy Policy', onTap: () => _openUrl('$BASE_URL/privacy')),
           _div(),
-          _tile(Icons.chat_bubble_outline,      'Live Chat',      onTap: () => _openUrl('https://wa.me/995000000000')),
+          _tile(Icons.chat_bubble_outline,      'Live Chat',      onTap: () => _openUrl('https://wa.me/995568877899')),
           _div(),
           _tile(Icons.help_outline,             'FAQ',            onTap: () => Navigator.push(context, _route(FaqScreen()))),
           _div(),
