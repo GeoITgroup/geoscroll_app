@@ -7,6 +7,8 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'dart:convert';
 import 'dart:async';
 
@@ -21,7 +23,89 @@ const kBg         = Color(0xFFF4F6F4);
 
 final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
 
-void main() => runApp(const VelocarApp());
+// ─────────────────────────────────────────────────────────────────────────────
+// BACKGROUND MESSAGE HANDLER (top-level function, required by FCM)
+// ─────────────────────────────────────────────────────────────────────────────
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PUSH NOTIFICATION SERVICE
+// ─────────────────────────────────────────────────────────────────────────────
+class PushNotificationService {
+  static final FirebaseMessaging _messaging = FirebaseMessaging.instance;
+
+  static Future<void> init() async {
+    // Permission request
+    await _messaging.requestPermission(
+      alert: true, badge: true, sound: true,
+    );
+
+    // FCM Token სერვერზე გაგზავნა
+    final token = await _messaging.getToken();
+    if (token != null) await _saveTokenToServer(token);
+
+    // Token განახლება
+    _messaging.onTokenRefresh.listen(_saveTokenToServer);
+
+    // Foreground messages
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      _showInAppNotification(message);
+    });
+
+    // Background tap → app open
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      _handleNotificationTap(message);
+    });
+
+    // Background handler
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  }
+
+  static Future<void> _saveTokenToServer(String token) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final sessionToken = prefs.getString('session_token') ?? '';
+      if (sessionToken.isEmpty) return;
+      await http.post(
+        Uri.parse('$BASE_URL/api/user/fcm-token'),
+        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $sessionToken'},
+        body: jsonEncode({'fcm_token': token}),
+      );
+      await prefs.setString('fcm_token', token);
+    } catch (_) {}
+  }
+
+  static void _showInAppNotification(RemoteMessage message) {
+    final notification = message.notification;
+    if (notification == null) return;
+    _notificationKey.currentState?.showNotification(
+      title: notification.title ?? 'Velocar',
+      body: notification.body ?? '',
+    );
+  }
+
+  static void _handleNotificationTap(RemoteMessage message) {
+    // navigate based on data payload
+  }
+
+  static Future<void> resendToken() async {
+    final token = await _messaging.getToken();
+    if (token != null) await _saveTokenToServer(token);
+  }
+}
+
+// Global key for in-app notification overlay
+final GlobalKey<_InAppNotificationState> _notificationKey = GlobalKey();
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
+  await PushNotificationService.init();
+  runApp(const VelocarApp());
+}
 
 class VelocarApp extends StatelessWidget {
   const VelocarApp({super.key});
@@ -30,7 +114,66 @@ class VelocarApp extends StatelessWidget {
       title: 'Velocar', debugShowCheckedModeBanner: false,
       theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: kGreen, primary: kGreen),
           useMaterial3: true, fontFamily: 'Roboto'),
-      home: const SplashScreen());
+      home: InAppNotificationWrapper(child: const SplashScreen()));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IN-APP NOTIFICATION BANNER (foreground push-ის დროს)
+// ─────────────────────────────────────────────────────────────────────────────
+class InAppNotificationWrapper extends StatefulWidget {
+  final Widget child;
+  const InAppNotificationWrapper({super.key, required this.child});
+  @override State<InAppNotificationWrapper> createState() => _InAppNotificationState();
+}
+
+class _InAppNotificationState extends State<InAppNotificationWrapper>
+    with SingleTickerProviderStateMixin {
+  String _title = '', _body = '';
+  bool _visible = false;
+  Timer? _timer;
+  late AnimationController _anim;
+  late Animation<Offset> _slide;
+
+  @override void initState() {
+    super.initState();
+    _anim = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
+    _slide = Tween<Offset>(begin: const Offset(0, -1), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _anim, curve: Curves.easeOut));
+  }
+
+  @override void dispose() { _anim.dispose(); _timer?.cancel(); super.dispose(); }
+
+  void showNotification({required String title, required String body}) {
+    setState(() { _title = title; _body = body; _visible = true; });
+    _anim.forward(from: 0);
+    _timer?.cancel();
+    _timer = Timer(const Duration(seconds: 4), () {
+      _anim.reverse().then((_) => setState(() => _visible = false));
+    });
+  }
+
+  @override Widget build(BuildContext context) => Stack(children: [
+      widget.child,
+      if (_visible) Positioned(top: 0, left: 0, right: 0,
+  child: SlideTransition(position: _slide,
+  child: SafeArea(child: Padding(padding: const EdgeInsets.all(12),
+  child: Material(elevation: 8, borderRadius: BorderRadius.circular(14),
+  child: Container(padding: const EdgeInsets.all(14),
+  decoration: BoxDecoration(color: kDark, borderRadius: BorderRadius.circular(14)),
+  child: Row(children: [
+  Container(width: 40, height: 40,
+  decoration: const BoxDecoration(color: kGreen, shape: BoxShape.circle),
+  child: const Icon(Icons.notifications, color: Colors.white, size: 20)),
+  const SizedBox(width: 12),
+  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+  Text(_title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+  const SizedBox(height: 2),
+  Text(_body, style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12)),
+  ])),
+  IconButton(icon: const Icon(Icons.close, color: Colors.white54, size: 18),
+  onPressed: () => _anim.reverse().then((_) => setState(() => _visible = false))),
+  ])))))),
+  ]);
 }
 
 Future<Map<String,String>> _authHeaders() async {
@@ -67,6 +210,8 @@ class _SplashScreenState extends State<SplashScreen> {
     if (tripId != null && deviceId != null) {
       Navigator.pushReplacement(context, _route(ActiveRideScreen(tripId: tripId, deviceId: deviceId)));
     } else if (token != null && token.isNotEmpty) {
+      // Login-ის შემდეგ FCM token სერვერზე გაგზავნა
+      await PushNotificationService.resendToken();
       Navigator.pushReplacement(context, _route(const MainScreen()));
     } else {
       Navigator.pushReplacement(context, _route(const LoginScreen()));
@@ -103,6 +248,7 @@ class _LoginScreenState extends State<LoginScreen> {
       final data = jsonDecode(res.body);
       if (data['success'] == true) {
         await _saveSession(data);
+        await PushNotificationService.resendToken();
         if (mounted) Navigator.pushReplacement(context, _route(const MainScreen()));
       } else { setState(() => _error = data['error'] ?? 'შეცდომა'); }
     } catch (_) { setState(() => _error = 'სერვერთან კავშირის შეცდომა'); }
@@ -122,6 +268,7 @@ class _LoginScreenState extends State<LoginScreen> {
       final data = jsonDecode(res.body);
       if (data['success'] == true) {
         await _saveSession(data, ga: account);
+        await PushNotificationService.resendToken();
         if (mounted) Navigator.pushReplacement(context, _route(const MainScreen()));
       } else { setState(() => _error = data['error'] ?? 'Google-ით შესვლა ვერ მოხერხდა'); }
     } catch (_) { setState(() => _error = 'Google-ით შესვლა ვერ მოხერხდა'); }
@@ -402,13 +549,12 @@ class _QRScanScreenState extends State<QRScanScreen> {
     final v = value.trim();
     try {
       if (v.contains('?')) {
-        // URL ფორმატი: https://velocar.ge/ride?id=X ან geoscroll://scan?device_id=X
         final uri = Uri.parse(v);
         deviceId = uri.queryParameters['id'] ?? uri.queryParameters['device_id'] ?? '';
       }
       if (deviceId.isEmpty && v.contains('id='))         deviceId = v.split('id=').last.split('&').first.trim();
       if (deviceId.isEmpty && v.contains('device_id='))  deviceId = v.split('device_id=').last.split('&').first.trim();
-      if (deviceId.isEmpty)                              deviceId = v; // უბრალო ნომერი
+      if (deviceId.isEmpty)                              deviceId = v;
     } catch (_) { deviceId = v; }
     if (deviceId.isNotEmpty) {
       Navigator.pushReplacement(context, _route(ScooterDetailScreen(deviceId: deviceId)));
@@ -488,7 +634,6 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
   }
 
   Future<void> _startRide() async {
-    // ბატარეის შემოწმება
     final battery = int.tryParse(_scooter?['battery']?.toString() ?? '100') ?? 100;
     if (battery < 5) {
       if (mounted) showDialog(context: context, builder: (_) => AlertDialog(
@@ -500,7 +645,6 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
               child: const Text('გასაგებია', style: TextStyle(color: Colors.white)))]));
       return;
     }
-    // ბარათის შემოწმება
     final prefs = await SharedPreferences.getInstance();
     final hasCard = prefs.getBool('has_card') ?? false;
     if (!hasCard) {
@@ -624,7 +768,6 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     if (ok!=true) return;
     setState(()=>_ending=true);
     try {
-      // GPS პოზიციის მიღება
       double? lat, lng;
       try {
         var perm = await Geolocator.checkPermission();
@@ -642,7 +785,6 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
       final res = await http.post(Uri.parse('$BASE_URL/api/trips/end'), headers: h, body: jsonEncode(body));
       final data = jsonDecode(res.body);
 
-      // ზონის შეცდომა
       if (data['error'] == 'zone_violation') {
         setState(()=>_ending=false);
         if (mounted) showDialog(context: context, builder: (_) => AlertDialog(
@@ -752,7 +894,7 @@ class _TripsScreenState extends State<TripsScreen> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MENU SCREEN  ☰  (ჰამბურგერი)
+// MENU SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
 class MenuScreen extends StatefulWidget {
   const MenuScreen({super.key});
@@ -791,18 +933,11 @@ class _MenuScreenState extends State<MenuScreen> {
   Future<void> _openUrl(String url) async {
     final uri = Uri.parse(url);
     try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-        return;
-      }
+      if (await canLaunchUrl(uri)) { await launchUrl(uri, mode: LaunchMode.externalApplication); return; }
     } catch (_) {}
-    try {
-      await launchUrl(uri, mode: LaunchMode.platformDefault);
-      return;
-    } catch (_) {}
-    try {
-      await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
-    } catch (_) {
+    try { await launchUrl(uri, mode: LaunchMode.platformDefault); return; } catch (_) {}
+    try { await launchUrl(uri, mode: LaunchMode.inAppBrowserView); }
+    catch (_) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('ვერ გაიხსნა — დააკოპირე: +995 568 877 899')));
     }
@@ -812,8 +947,6 @@ class _MenuScreenState extends State<MenuScreen> {
       appBar: AppBar(backgroundColor: kDark, automaticallyImplyLeading: false,
           title: const Text('მენიუ', style: TextStyle(color: Colors.white))),
       body: SingleChildScrollView(child: Column(children: [
-
-        // ── Header ─────────────────────────────────────────────────────────
         Container(width: double.infinity, color: kDark, padding: const EdgeInsets.fromLTRB(24,28,24,28),
             child: Row(children: [
               _photoUrl.isNotEmpty
@@ -831,10 +964,7 @@ class _MenuScreenState extends State<MenuScreen> {
                         style: TextStyle(color: _verified?kGreen:Colors.yellow[700], fontSize:11, fontWeight:FontWeight.w600))),
               ])),
             ])),
-
         const SizedBox(height: 12),
-
-        // ── Section 1: Account & Wallet ─────────────────────────────────────
         _section([
           _tile(Icons.person_outline, 'Account & Settings',
               trailing: !_verified ? _badge('Unverified', Colors.yellow[700]!) : null,
@@ -844,10 +974,7 @@ class _MenuScreenState extends State<MenuScreen> {
               trailing: !_hasCard ? _badge('ბარათი არ არის', kOrange) : null,
               onTap: () => Navigator.push(context, _route(const CardScreen())).then((_)=>_load())),
         ]),
-
         const SizedBox(height: 12),
-
-        // ── Section 2: Info ─────────────────────────────────────────────────
         _section([
           _tile(Icons.privacy_tip_outlined,     'Privacy Policy', onTap: () => _openUrl('$BASE_URL/privacy')),
           _div(),
@@ -859,15 +986,9 @@ class _MenuScreenState extends State<MenuScreen> {
           _div(),
           _tile(Icons.directions_bike_outlined, 'How to Ride',    onTap: () => Navigator.push(context, _route(HowToRideScreen()))),
         ]),
-
         const SizedBox(height: 12),
-
-        // ── Section 3: Logout ───────────────────────────────────────────────
         _section([_tile(Icons.logout, 'გამოსვლა', color: Colors.red, onTap: _logout)]),
-
         const SizedBox(height: 32),
-
-        // ── Footer ──────────────────────────────────────────────────────────
         Column(children: [
           const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
             Text('Ride Green ', style: TextStyle(color: Colors.grey, fontSize: 14)),
@@ -1065,7 +1186,8 @@ class FaqScreen extends StatelessWidget {
     ('სად შემიძლია სქროლის დატოვება?','სქროლი დატოვე მწვანე ზონაში — რუკაზე ნაჩვენები სერვის არეალი.'),
     ('ბატარეა გამოილია — რა ვქნა?',  'სქროლი მაინც შეაჩერე აპიდან. დაგვიკავშირდი Live Chat-ის გზით.'),
     ('გადახდა ვერ მოხდა — რა ვქნა?', 'შეამოწმე ბარათი Wallet & Payments-ში. BOG ბარათი უნდა იყოს მიბმული.'),
-    ('მოგზაურობა ვერ ვხედავ?',        'ისტორია ტაბზე ნახავ ყველა მოგზაურობას. პრობლემის შემთხვევაში Live Chat-ზე გვწერე.'),  ];
+    ('მოგზაურობა ვერ ვხედავ?',        'ისტორია ტაბზე ნახავ ყველა მოგზაურობას. პრობლემის შემთხვევაში Live Chat-ზე გვწერე.'),
+  ];
   @override Widget build(BuildContext context) => Scaffold(backgroundColor: kBg,
       appBar: AppBar(backgroundColor:kDark, title:const Text('FAQ',style:TextStyle(color:Colors.white)),
           leading:IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
