@@ -21,7 +21,7 @@ const kOrange     = Color(0xFFF07C2A);
 const kDark       = Color(0xFF1A2B22);
 const kBg         = Color(0xFFF4F6F4);
 
-final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
+final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: ['email', 'profile'], serverClientId: '436526588194-85fiena6tt4smliaugi68qki0mlgo7cb.apps.googleusercontent.com');
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
