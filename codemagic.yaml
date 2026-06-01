@@ -5,10 +5,18 @@ workflows:
     environment:
       flutter: 3.19.6
       java: 17
+      vars:
+        CM_KEYSTORE: $CM_KEYSTORE
+        CM_KEYSTORE_PASSWORD: $CM_KEYSTORE_PASSWORD
+        CM_KEY_ALIAS: $CM_KEY_ALIAS
+        CM_KEY_PASSWORD: $CM_KEY_PASSWORD
     scripts:
+      - name: Set up keystore
+        script: |
+          echo $CM_KEYSTORE | base64 --decode > android/app/velocar-release.jks
       - name: Get packages
         script: flutter pub get
       - name: Build APK
-        script: flutter build apk --debug
+        script: flutter build apk --release
     artifacts:
       - build/**/outputs/**/*.apk
