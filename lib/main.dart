@@ -1027,140 +1027,172 @@ class CardScreen extends StatefulWidget {
   @override State<CardScreen> createState() => _CardScreenState();
 }
 class _CardScreenState extends State<CardScreen> {
-bool _loading=false, _hasCard=false; Map? _cardInfo;
-@override void initState() { super.initState(); _loadCard(); }
-Future<void> _loadCard() async {
-setState(()=>_loading=true);
-try {
-final h = await _authHeaders();
-final res = await http.get(Uri.parse('$BASE_URL/api/user/card-status'), headers: h);
-final d = jsonDecode(res.body);
-if (mounted) setState(() { _hasCard=d['has_card']==true; _cardInfo=d['card']; });
-} catch (_) {}
-setState(()=>_loading=false);
+  bool _loading=false, _hasCard=false; Map? _cardInfo;
+  @override void initState() { super.initState(); _loadCard(); }
+  Future<void> _loadCard() async {
+    setState(()=>_loading=true);
+    try {
+      final h = await _authHeaders();
+      final res = await http.get(Uri.parse('$BASE_URL/api/user/card-status'), headers: h);
+      final d = jsonDecode(res.body);
+      if (mounted) setState(() { _hasCard=d['has_card']==true; _cardInfo=d['card']; });
+    } catch (_) {}
+    setState(()=>_loading=false);
+  }
+  Future<void> _addCard() async {
+    setState(()=>_loading=true);
+    try {
+      final h = await _authHeaders();
+      final res = await http.post(Uri.parse('$BASE_URL/api/bog/save-card'), headers: h,
+          body: jsonEncode({'return_url': '$BASE_URL/card-success'}));
+      final d = jsonDecode(res.body);
+      if (d['redirect_url']!=null) { final uri=Uri.parse(d['redirect_url'] as String); if (await canLaunchUrl(uri)) await launchUrl(uri,mode:LaunchMode.externalApplication); }
+      else { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('სერვერის შეცდომა'))); }
+    } catch (_) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('კავშირის შეცდომა'))); }
+    setState(()=>_loading=false);
+  }
+  Future<void> _removeCard() async {
+    final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
+        title: const Text('ბარათის წაშლა'), content: const Text('დარწმუნებული ხარ?'),
+        actions: [TextButton(onPressed:()=>Navigator.pop(context,false),child:const Text('გაუქმება')),
+          ElevatedButton(onPressed:()=>Navigator.pop(context,true),style:ElevatedButton.styleFrom(backgroundColor:Colors.red),
+              child:const Text('წაშლა',style:TextStyle(color:Colors.white)))]));
+    if (ok!=true) return;
+    setState(()=>_loading=true);
+    try {
+      final h = await _authHeaders();
+      await http.delete(Uri.parse('$BASE_URL/api/user/card'), headers: h);
+      final prefs = await SharedPreferences.getInstance(); await prefs.setBool('has_card',false);
+      await _loadCard();
+    } catch (_) {}
+    setState(()=>_loading=false);
+  }
+  @override Widget build(BuildContext context) => Scaffold(backgroundColor: kBg,
+      appBar: AppBar(backgroundColor: kDark,
+          title: const Text('Wallet & Payments',style:TextStyle(color:Colors.white)),
+          leading: IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
+      body: _loading?const Center(child:CircularProgressIndicator(color:kGreen))
+          :Padding(padding:const EdgeInsets.all(20),child:Column(children:[
+        Container(width:double.infinity,height:190,
+            decoration:BoxDecoration(gradient:const LinearGradient(colors:[kDark,Color(0xFF2E4D3A)],begin:Alignment.topLeft,end:Alignment.bottomRight),
+                borderRadius:BorderRadius.circular(20),boxShadow:[BoxShadow(color:kDark.withOpacity(0.35),blurRadius:20,offset:const Offset(0,8))]),
+            padding:const EdgeInsets.all(24),
+            child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+              Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+                const Text('VELOCAR',style:TextStyle(color:Colors.white,fontSize:18,fontWeight:FontWeight.bold,letterSpacing:2)),
+                Icon(_hasCard?Icons.credit_card:Icons.credit_card_off,color:Colors.white.withOpacity(0.6),size:28)]),
+              const Spacer(),
+              Text(_hasCard&&_cardInfo?['masked_number']!=null?_cardInfo!['masked_number']:'•••• •••• •••• ••••',
+                  style:TextStyle(color:Colors.white.withOpacity(0.9),fontSize:20,letterSpacing:4,fontWeight:FontWeight.w300)),
+              const SizedBox(height:16),
+              Row(mainAxisAlignment:MainAxisAlignment.start,children:[
+                Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+                  Text('CARDHOLDER',style:TextStyle(color:Colors.white.withOpacity(0.4),fontSize:10,letterSpacing:1)),
+                  const SizedBox(height:2),
+                  Text(_hasCard?(_cardInfo?['holder']??'Velocar User'):'—',style:const TextStyle(color:Colors.white,fontSize:14,fontWeight:FontWeight.w500))]),
+                const Spacer(),
+                if (_hasCard&&_cardInfo?['expiry']!=null) Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+                  Text('EXPIRES',style:TextStyle(color:Colors.white.withOpacity(0.4),fontSize:10,letterSpacing:1)),
+                  const SizedBox(height:2),
+                  Text(_cardInfo!['expiry'],style:const TextStyle(color:Colors.white,fontSize:14,fontWeight:FontWeight.w500))])])])),
+        const SizedBox(height:20),
+        Container(padding:const EdgeInsets.all(16),
+            decoration:BoxDecoration(color:_hasCard?kGreen.withOpacity(0.08):Colors.orange.withOpacity(0.08),borderRadius:BorderRadius.circular(14),border:Border.all(color:_hasCard?kGreen.withOpacity(0.2):kOrange.withOpacity(0.2))),
+            child:Row(children:[Icon(_hasCard?Icons.check_circle:Icons.info_outline,color:_hasCard?kGreen:kOrange),const SizedBox(width:12),
+              Expanded(child:Text(_hasCard?'ბარათი მიბმულია. გაქირავება ავტომატურად ჩამოეჭრება.':'ბარათი არ არის მიბმული.',
+                  style:TextStyle(color:_hasCard?kGreen:kOrange,fontSize:13)))])),
+        const SizedBox(height:20),
+        SizedBox(width:double.infinity,height:54,
+            child:ElevatedButton.icon(icon:Icon(_hasCard?Icons.edit:Icons.add_card,color:Colors.white),
+                label:Text(_hasCard?'ბარათის შეცვლა':'ბარათის დამატება (BOG)',style:const TextStyle(fontSize:16,fontWeight:FontWeight.bold,color:Colors.white)),
+                style:ElevatedButton.styleFrom(backgroundColor:kGreen,shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(14))),
+                onPressed:_addCard)),
+        if (_hasCard)...[const SizedBox(height:12),
+          SizedBox(width:double.infinity,height:48,
+              child:OutlinedButton.icon(icon:const Icon(Icons.delete_outline,color:Colors.red),
+                  label:const Text('ბარათის წაშლა',style:TextStyle(color:Colors.red,fontWeight:FontWeight.w600)),
+                  style:OutlinedButton.styleFrom(side:const BorderSide(color:Colors.red),shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(14))),
+                  onPressed:_removeCard))],
+        const Spacer(),
+        Text('გადახდა უზრუნველყოფილია Bank of Georgia-ს მიერ',style:TextStyle(color:Colors.grey[400],fontSize:12)),
+      ])));
 }
-Future<void> _addCard() async {
-setState(()=>_loading=true);
-try {
-final h = await _authHeaders();
-final res = await http.post(Uri.parse('$BASE_URL/api/bog/save-card'), headers: h,
-body: jsonEncode({'return_url': '$BASE_URL/card-success'}));
-final d = jsonDecode(res.body);
-if (d['redirect_url']!=null) { final uri=Uri.parse(d['redirect_url'] as String); if (await canLaunchUrl(uri)) await launchUrl(uri,mode:LaunchMode.externalApplication); }
-else { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('სერვერის შეცდომა'))); }
-} catch (_) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('კავშირის შეცდომა'))); }
-setState(()=>_loading=false);
-}
-Future<void> _removeCard() async {
-final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
-title: const Text('ბარათის წაშლა'), content: const Text('დარწმუნებული ხარ?'),
-actions: [TextButton(onPressed:()=>Navigator.pop(context,false),child:const Text('გაუქმება')),
-ElevatedButton(onPressed:()=>Navigator.pop(context,true),style:ElevatedButton.styleFrom(backgroundColor:Colors.red),
-child:const Text('წაშლა',style:TextStyle(color:Colors.white)))]));
-if (ok!=true) return;
-setState(()=>_loading=true);
-try {
-final h = await _authHeaders();
-await http.delete(Uri.parse('$BASE_URL/api/user/card'), headers: h);
-final prefs = await SharedPreferences.getInstance(); await prefs.setBool('has_card',false);
-await _loadCard();
-} catch (_) {}
-setState(()=>_loading=false);
-}
-@override Widget build(BuildContext context) => Scaffold(backgroundColor: kBg,
-appBar: AppBar(backgroundColor: kDark,
-title: const Text('Wallet & Payments',style:TextStyle(color:Colors.white)),
-leading: IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
-body: _loading?const Center(child:CircularProgressIndicator(color:kGreen))
-:Padding(padding:const EdgeInsets.all(20),child:Column(children:[
-Container(width:double.infinity,height:190,
-decoration:BoxDecoration(gradient:const LinearGradient(colors:[kDark,Color(0xFF2E4D3A)],begin:Alignment.topLeft,end:Alignment.bottomRight),
-borderRadius:BorderRadius.circular(20),boxShadow:[BoxShadow(color:kDark.withOpacity(0.35),blurRadius:20,offset:const Offset(0,8))]),
-padding:const EdgeInsets.all(24),
-child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
-const Text('VELOCAR',style:TextStyle(color:Colors.white,fontSize:18,fontWeight:FontWeight.bold,letterSpacing:2)),
-Icon(_hasCard?Icons.credit_card:Icons.credit_card_off,color:Colors.white.withOpacity(0.6),size:28)]),
-const Spacer(),
-Text(_hasCard&&_cardInfo?['masked_number']!=null?_cardInfo!['masked_number']:'•••• •••• •••• ••••',
-style:TextStyle(color:Colors.white.withOpacity(0.9),fontSize:20,letterSpacing:4,fontWeight:FontWeight.w300)),
-const SizedBox(height:16),
-Row(
+
 class FaqScreen extends StatelessWidget {
-const FaqScreen({super.key});
-static final _faqs = [
-('როგორ დავიწყო გაქირავება?',    'გახსენი აპი, დააჭირე სქროლის სკანირება და დაასკანირე სქროლზე არსებული QR კოდი.'),
-('რა ღირს გაქირავება?',          '₾0.15 წუთში. პირველი წუთი უფასოა.'),
-('სად შემიძლია სქროლის დატოვება?','სქროლი დატოვე მწვანე ზონაში — რუკაზე ნაჩვენები სერვის არეალი.'),
-('ბატარეა გამოილია — რა ვქნა?',  'სქროლი მაინც შეაჩერე აპიდან. დაგვიკავშირდი Live Chat-ის გზით.'),
-('გადახდა ვერ მოხდა — რა ვქნა?', 'შეამოწმე ბარათი Wallet & Payments-ში. BOG ბარათი უნდა იყოს მიბმული.'),
-('მოგზაურობა ვერ ვხედავ?',        'ისტორია ტაბზე ნახავ ყველა მოგზაურობას. პრობლემის შემთხვევაში Live Chat-ზე გვწერე.'),
-];
-@override Widget build(BuildContext context) => Scaffold(backgroundColor: kBg,
-appBar: AppBar(backgroundColor:kDark, title:const Text('FAQ',style:TextStyle(color:Colors.white)),
-leading:IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
-body: ListView.builder(padding:const EdgeInsets.all(16),itemCount:_faqs.length,itemBuilder:(_,i){
-final (q,a) = _faqs[i];
-return Container(margin:const EdgeInsets.only(bottom:12),
-decoration:BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(14),boxShadow:[BoxShadow(color:Colors.black.withOpacity(0.04),blurRadius:8)]),
-child:ExpansionTile(
-leading:Container(width:32,height:32,decoration:BoxDecoration(color:kGreen.withOpacity(0.1),shape:BoxShape.circle),child:const Icon(Icons.help_outline,color:kGreen,size:18)),
-title:Text(q,style:const TextStyle(fontWeight:FontWeight.w600,color:kDark,fontSize:14)),
-children:[Padding(padding:const EdgeInsets.fromLTRB(16,0,16,16),
-child:Text(a,style:TextStyle(color:Colors.grey[600],fontSize:13,height:1.5)))]));
-}));
+  const FaqScreen({super.key});
+  static final _faqs = [
+    ('როგორ დავიწყო გაქირავება?',    'გახსენი აპი, დააჭირე სქროლის სკანირება და დაასკანირე სქროლზე არსებული QR კოდი.'),
+    ('რა ღირს გაქირავება?',          '₾0.15 წუთში. პირველი წუთი უფასოა.'),
+    ('სად შემიძლია სქროლის დატოვება?','სქროლი დატოვე მწვანე ზონაში — რუკაზე ნაჩვენები სერვის არეალი.'),
+    ('ბატარეა გამოილია — რა ვქნა?',  'სქროლი მაინც შეაჩერე აპიდან. დაგვიკავშირდი Live Chat-ის გზით.'),
+    ('გადახდა ვერ მოხდა — რა ვქნა?', 'შეამოწმე ბარათი Wallet & Payments-ში. BOG ბარათი უნდა იყოს მიბმული.'),
+    ('მოგზაურობა ვერ ვხედავ?',        'ისტორია ტაბზე ნახავ ყველა მოგზაურობას. პრობლემის შემთხვევაში Live Chat-ზე გვწერე.'),
+  ];
+  @override Widget build(BuildContext context) => Scaffold(backgroundColor: kBg,
+      appBar: AppBar(backgroundColor:kDark, title:const Text('FAQ',style:TextStyle(color:Colors.white)),
+          leading:IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
+      body: ListView.builder(padding:const EdgeInsets.all(16),itemCount:_faqs.length,itemBuilder:(_,i){
+        final (q,a) = _faqs[i];
+        return Container(margin:const EdgeInsets.only(bottom:12),
+            decoration:BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(14),boxShadow:[BoxShadow(color:Colors.black.withOpacity(0.04),blurRadius:8)]),
+            child:ExpansionTile(
+                leading:Container(width:32,height:32,decoration:BoxDecoration(color:kGreen.withOpacity(0.1),shape:BoxShape.circle),child:const Icon(Icons.help_outline,color:kGreen,size:18)),
+                title:Text(q,style:const TextStyle(fontWeight:FontWeight.w600,color:kDark,fontSize:14)),
+                children:[Padding(padding:const EdgeInsets.fromLTRB(16,0,16,16),
+                    child:Text(a,style:TextStyle(color:Colors.grey[600],fontSize:13,height:1.5)))]));
+      }));
 }
 
 class SafetyScreen extends StatelessWidget {
-const SafetyScreen({super.key});
-static final _rules = [
-(Icons.security,      'ჩაფხუტი',       'გამოიყენე ჩაფხუტი სიარულის დროს.'),
-(Icons.speed,         'სიჩქარე',        'ქალაქში მაქსიმუმ 25 კმ/სთ.'),
-(Icons.no_drinks,     'ალკოჰოლი',       'ალკოჰოლის ზემოქმედებით სიარული მკაცრად აკრძალულია.'),
-(Icons.people,        'ერთი მგზავრი',   'სქროლზე ერთი ადამიანი იჯდება.'),
-(Icons.phone_android, 'ტელეფონი',       'სიარულის დროს ტელეფონის გამოყენება საშიშია.'),
-(Icons.park,          'ქვეითთა ბილიკი', 'ქვეითთა ბილიკებზე სიარული აკრძალულია.'),
-];
-@override Widget build(BuildContext context) => Scaffold(backgroundColor:kBg,
-appBar:AppBar(backgroundColor:kDark,title:const Text('Safety',style:TextStyle(color:Colors.white)),
-leading:IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
-body:ListView(padding:const EdgeInsets.all(16),children:[
-Container(padding:const EdgeInsets.all(16),margin:const EdgeInsets.only(bottom:16),
-decoration:BoxDecoration(color:kGreen.withOpacity(0.08),borderRadius:BorderRadius.circular(14),border:Border.all(color:kGreen.withOpacity(0.2))),
-child:const Row(children:[Icon(Icons.shield,color:kGreen),SizedBox(width:12),
-Expanded(child:Text('შენი უსაფრთხოება ჩვენთვის პრიორიტეტია.',style:TextStyle(color:kGreen,fontWeight:FontWeight.w600)))])),
-..._rules.map((r){final icon=r.$1; final title=r.$2; final desc=r.$3; return Container(margin:const EdgeInsets.only(bottom:10),padding:const EdgeInsets.all(16),
-decoration:BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(14),boxShadow:[BoxShadow(color:Colors.black.withOpacity(0.04),blurRadius:8)]),
-child:Row(children:[Container(width:44,height:44,decoration:BoxDecoration(color:kGreen.withOpacity(0.1),shape:BoxShape.circle),child:Icon(icon,color:kGreen,size:22)),
-const SizedBox(width:14),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-Text(title,style:const TextStyle(fontWeight:FontWeight.bold,color:kDark)),const SizedBox(height:2),
-Text(desc,style:TextStyle(color:Colors.grey[600],fontSize:13))]))]));})
-]));
+  const SafetyScreen({super.key});
+  static final _rules = [
+    (Icons.security,      'ჩაფხუტი',       'გამოიყენე ჩაფხუტი სიარულის დროს.'),
+    (Icons.speed,         'სიჩქარე',        'ქალაქში მაქსიმუმ 25 კმ/სთ.'),
+    (Icons.no_drinks,     'ალკოჰოლი',       'ალკოჰოლის ზემოქმედებით სიარული მკაცრად აკრძალულია.'),
+    (Icons.people,        'ერთი მგზავრი',   'სქროლზე ერთი ადამიანი იჯდება.'),
+    (Icons.phone_android, 'ტელეფონი',       'სიარულის დროს ტელეფონის გამოყენება საშიშია.'),
+    (Icons.park,          'ქვეითთა ბილიკი', 'ქვეითთა ბილიკებზე სიარული აკრძალულია.'),
+  ];
+  @override Widget build(BuildContext context) => Scaffold(backgroundColor:kBg,
+      appBar:AppBar(backgroundColor:kDark,title:const Text('Safety',style:TextStyle(color:Colors.white)),
+          leading:IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
+      body:ListView(padding:const EdgeInsets.all(16),children:[
+        Container(padding:const EdgeInsets.all(16),margin:const EdgeInsets.only(bottom:16),
+            decoration:BoxDecoration(color:kGreen.withOpacity(0.08),borderRadius:BorderRadius.circular(14),border:Border.all(color:kGreen.withOpacity(0.2))),
+            child:const Row(children:[Icon(Icons.shield,color:kGreen),SizedBox(width:12),
+              Expanded(child:Text('შენი უსაფრთხოება ჩვენთვის პრიორიტეტია.',style:TextStyle(color:kGreen,fontWeight:FontWeight.w600)))])),
+        ..._rules.map((r){final icon=r.$1; final title=r.$2; final desc=r.$3; return Container(margin:const EdgeInsets.only(bottom:10),padding:const EdgeInsets.all(16),
+            decoration:BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(14),boxShadow:[BoxShadow(color:Colors.black.withOpacity(0.04),blurRadius:8)]),
+            child:Row(children:[Container(width:44,height:44,decoration:BoxDecoration(color:kGreen.withOpacity(0.1),shape:BoxShape.circle),child:Icon(icon,color:kGreen,size:22)),
+              const SizedBox(width:14),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+                Text(title,style:const TextStyle(fontWeight:FontWeight.bold,color:kDark)),const SizedBox(height:2),
+                Text(desc,style:TextStyle(color:Colors.grey[600],fontSize:13))]))]));})
+      ]));
 }
 
 class HowToRideScreen extends StatelessWidget {
-const HowToRideScreen({super.key});
-static final _steps = [
-(Icons.download_done,        'აპის გახსნა',   'გახსენი Velocar და შედი შენი ანგარიშით.'),
-(Icons.qr_code_scanner,      'QR სკანირება',  'სქროლთან მიახლოვდი და დაასკანირე QR კოდი.'),
-(Icons.payment,              'გადახდა',       'BOG ბარათით გაიარე გადახდა. სქროლი იხსნება.'),
-(Icons.electric_scooter,     'სიარული',       'გამოიყენე სქროლი. ყურადღება მიმოქცევაზე!'),
-(Icons.location_on,          'სერვის ზონა',   'დარჩი მწვანე ზონაში — გარეთ გასვლა დაუშვებელია.'),
-(Icons.stop_circle_outlined, 'დასრულება',     'ჩააპარკე სქროლი სწორ ადგილას და დაასრულე გაქირავება.'),
-];
-@override Widget build(BuildContext context) => Scaffold(backgroundColor:kBg,
-appBar:AppBar(backgroundColor:kDark,title:const Text('How to Ride',style:TextStyle(color:Colors.white)),
-leading:IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
-body:ListView.builder(padding:const EdgeInsets.all(16),itemCount:_steps.length,itemBuilder:(_,i){
-final step=_steps[i];
-final icon=step.$1; final title=step.$2; final desc=step.$3;
-return Row(crossAxisAlignment:CrossAxisAlignment.start,children:[
-Column(children:[Container(width:44,height:44,decoration:const BoxDecoration(color:kGreen,shape:BoxShape.circle),
-child:Center(child:Icon(icon,color:Colors.white,size:22))),
-if(i<_steps.length-1)Container(width:2,height:40,color:kGreen.withOpacity(0.2))]),
-const SizedBox(width:16),
-Expanded(child:Padding(padding:const EdgeInsets.only(bottom:24),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-const SizedBox(height:10),Text(title,style:const TextStyle(fontWeight:FontWeight.bold,color:kDark,fontSize:15)),
-const SizedBox(height:4),Text(desc,style:TextStyle(color:Colors.grey[600],fontSize:13,height:1.5))])))]);
-}));
+  const HowToRideScreen({super.key});
+  static final _steps = [
+    (Icons.download_done,        'აპის გახსნა',   'გახსენი Velocar და შედი შენი ანგარიშით.'),
+    (Icons.qr_code_scanner,      'QR სკანირება',  'სქროლთან მიახლოვდი და დაასკანირე QR კოდი.'),
+    (Icons.payment,              'გადახდა',       'BOG ბარათით გაიარე გადახდა. სქროლი იხსნება.'),
+    (Icons.electric_scooter,     'სიარული',       'გამოიყენე სქროლი. ყურადღება მიმოქცევაზე!'),
+    (Icons.location_on,          'სერვის ზონა',   'დარჩი მწვანე ზონაში — გარეთ გასვლა დაუშვებელია.'),
+    (Icons.stop_circle_outlined, 'დასრულება',     'ჩააპარკე სქროლი სწორ ადგილას და დაასრულე გაქირავება.'),
+  ];
+  @override Widget build(BuildContext context) => Scaffold(backgroundColor:kBg,
+      appBar:AppBar(backgroundColor:kDark,title:const Text('How to Ride',style:TextStyle(color:Colors.white)),
+          leading:IconButton(icon:const Icon(Icons.arrow_back,color:Colors.white),onPressed:()=>Navigator.pop(context))),
+      body:ListView.builder(padding:const EdgeInsets.all(16),itemCount:_steps.length,itemBuilder:(_,i){
+        final step=_steps[i];
+        final icon=step.$1; final title=step.$2; final desc=step.$3;
+        return Row(crossAxisAlignment:CrossAxisAlignment.start,children:[
+          Column(children:[Container(width:44,height:44,decoration:const BoxDecoration(color:kGreen,shape:BoxShape.circle),
+              child:Center(child:Icon(icon,color:Colors.white,size:22))),
+            if(i<_steps.length-1)Container(width:2,height:40,color:kGreen.withOpacity(0.2))]),
+          const SizedBox(width:16),
+          Expanded(child:Padding(padding:const EdgeInsets.only(bottom:24),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+            const SizedBox(height:10),Text(title,style:const TextStyle(fontWeight:FontWeight.bold,color:kDark,fontSize:15)),
+            const SizedBox(height:4),Text(desc,style:TextStyle(color:Colors.grey[600],fontSize:13,height:1.5))])))]);
+      }));
 }
