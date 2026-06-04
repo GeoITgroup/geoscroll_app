@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import 'dart:convert';
 import 'dart:async';
 
@@ -181,6 +182,80 @@ Widget _logo(double size, double iconSize) => Container(
         borderRadius: BorderRadius.circular(size * 0.255)),
     child: Icon(Icons.electric_scooter, size: iconSize, color: Colors.white));
 
+// ═══════════════════════════════════════════════════════════
+// WebView SCREEN — აპშიდე იხსნება BOG გვერდი
+// ═══════════════════════════════════════════════════════════
+class BogWebViewScreen extends StatefulWidget {
+  final String url;
+  final String title;
+  final VoidCallback? onSuccess;
+
+  const BogWebViewScreen({
+    super.key,
+    required this.url,
+    required this.title,
+    this.onSuccess,
+  });
+
+  @override
+  State<BogWebViewScreen> createState() => _BogWebViewScreenState();
+}
+
+class _BogWebViewScreenState extends State<BogWebViewScreen> {
+  late final WebViewController _controller;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setNavigationDelegate(NavigationDelegate(
+        onPageStarted: (_) => setState(() => _loading = true),
+        onPageFinished: (url) {
+          setState(() => _loading = false);
+          // წარმატებული გადახდის შემდეგ BOG გადამისამართებს callback URL-ზე
+          if (url.contains('velocar.ge/api/bog/callback') ||
+              url.contains('velocar.ge/payment/success') ||
+              url.contains('card-success')) {
+            widget.onSuccess?.call();
+            Navigator.pop(context, true);
+          }
+          // წარუმატებელი გადახდა
+          if (url.contains('payment/fail')) {
+            Navigator.pop(context, false);
+          }
+        },
+      ))
+      ..loadRequest(Uri.parse(widget.url));
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+      backgroundColor: kBg,
+      appBar: AppBar(
+          backgroundColor: kDark,
+          title: Text(widget.title, style: const TextStyle(color: Colors.white, fontSize: 15)),
+          leading: IconButton(
+              icon: const Icon(Icons.close, color: Colors.white),
+              onPressed: () => Navigator.pop(context, false)),
+          actions: [
+            if (_loading)
+              const Padding(
+                  padding: EdgeInsets.only(right: 16),
+                  child: Center(child: SizedBox(width: 20, height: 20,
+                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))))
+          ]),
+      body: Stack(children: [
+        WebViewWidget(controller: _controller),
+        if (_loading)
+          const Center(child: CircularProgressIndicator(color: kGreen)),
+      ]));
+}
+
+// ═══════════════════════════════════════════════════════════
+// SPLASH SCREEN
+// ═══════════════════════════════════════════════════════════
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
   @override State<SplashScreen> createState() => _SplashScreenState();
@@ -212,6 +287,9 @@ class _SplashScreenState extends State<SplashScreen> {
         const SizedBox(height: 48), const CircularProgressIndicator(color: kGreen)])));
 }
 
+// ═══════════════════════════════════════════════════════════
+// LOGIN SCREEN
+// ═══════════════════════════════════════════════════════════
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
   @override State<LoginScreen> createState() => _LoginScreenState();
@@ -325,6 +403,9 @@ class _LoginScreenState extends State<LoginScreen> {
               focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(13), borderSide: const BorderSide(color: kGreen, width: 1.5))));
 }
 
+// ═══════════════════════════════════════════════════════════
+// MAIN SCREEN
+// ═══════════════════════════════════════════════════════════
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
   @override State<MainScreen> createState() => _MainScreenState();
@@ -349,6 +430,9 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
+// ═══════════════════════════════════════════════════════════
+// MAP HOME SCREEN
+// ═══════════════════════════════════════════════════════════
 class MapHomeScreen extends StatefulWidget {
   const MapHomeScreen({super.key});
   @override State<MapHomeScreen> createState() => _MapHomeScreenState();
@@ -502,6 +586,9 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
   }
 }
 
+// ═══════════════════════════════════════════════════════════
+// QR SCAN SCREEN
+// ═══════════════════════════════════════════════════════════
 class QRScanScreen extends StatefulWidget {
   const QRScanScreen({super.key});
   @override State<QRScanScreen> createState() => _QRScanScreenState();
@@ -581,6 +668,9 @@ class _OverlayPainter extends CustomPainter {
   @override bool shouldRepaint(_) => false;
 }
 
+// ═══════════════════════════════════════════════════════════
+// SCOOTER DETAIL SCREEN — განახლებული WebView + Tariff Sheet
+// ═══════════════════════════════════════════════════════════
 class ScooterDetailScreen extends StatefulWidget {
   final String deviceId;
   const ScooterDetailScreen({super.key, required this.deviceId});
@@ -596,13 +686,136 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
       final h = await _authHeaders();
       final res = await http.get(Uri.parse('$BASE_URL/api/scooters'), headers: h);
       final d = jsonDecode(res.body);
-      if (d is List) { final s = d.firstWhere((s) => s['device_id']==widget.deviceId, orElse: ()=>null); setState(() { _scooter=s; _loading=false; }); }
-      else setState(()=>_loading=false);
+      if (d is List) {
+        final s = d.firstWhere((s) => s['device_id']==widget.deviceId, orElse: ()=>null);
+        setState(() { _scooter=s; _loading=false; });
+      } else setState(()=>_loading=false);
     } catch (_) { setState(()=>_loading=false); }
+  }
+
+  // ტარიფის confirmation bottom sheet — ბატარეა + ფასი
+  Future<bool> _showTariffSheet() async {
+    final battery = int.tryParse(_scooter?['battery']?.toString() ?? '100') ?? 100;
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Colors.white,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          // სახელური
+          Container(width: 40, height: 4,
+              decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 20),
+          const Text('გაქირავების დეტალები',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kDark)),
+          const SizedBox(height: 20),
+
+          // ბატარეა
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+                color: battery > 20 ? kGreen.withOpacity(0.07) : Colors.orange.withOpacity(0.07),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: battery > 20 ? kGreen.withOpacity(0.2) : Colors.orange.withOpacity(0.2))),
+            child: Row(children: [
+              Container(width: 52, height: 52, decoration: BoxDecoration(
+                  color: battery > 20 ? kGreen.withOpacity(0.12) : Colors.orange.withOpacity(0.12),
+                  shape: BoxShape.circle),
+                  child: Icon(Icons.battery_charging_full,
+                      color: battery > 20 ? kGreen : Colors.orange, size: 28)),
+              const SizedBox(width: 14),
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('ბატარეა', style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+                Text('$battery%',
+                    style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold,
+                        color: battery > 20 ? kDark : Colors.orange)),
+              ]),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                    color: battery > 50 ? kGreen.withOpacity(0.1) : battery > 20 ? Colors.orange.withOpacity(0.1) : Colors.red.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20)),
+                child: Text(
+                    battery > 50 ? 'კარგი' : battery > 20 ? 'საკმარისი' : 'დაბალი',
+                    style: TextStyle(
+                        color: battery > 50 ? kGreen : battery > 20 ? Colors.orange : Colors.red,
+                        fontWeight: FontWeight.w600, fontSize: 13)),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 12),
+
+          // ტარიფი
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+                color: kBg, borderRadius: BorderRadius.circular(14)),
+            child: Column(children: [
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                Row(children: [
+                  const Icon(Icons.access_time, color: kGreen, size: 18),
+                  const SizedBox(width: 8),
+                  Text('ტარიფი', style: TextStyle(color: Colors.grey[600], fontSize: 14)),
+                ]),
+                const Text('₾0.15 / წუთი',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: kDark)),
+              ]),
+              const SizedBox(height: 10),
+              const Divider(height: 1),
+              const SizedBox(height: 10),
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                Row(children: [
+                  const Icon(Icons.lock_open, color: kGreen, size: 18),
+                  const SizedBox(width: 8),
+                  Text('გახსნის საკომისიო', style: TextStyle(color: Colors.grey[600], fontSize: 14)),
+                ]),
+                const Text('უფასო', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: kGreen)),
+              ]),
+            ]),
+          ),
+          const SizedBox(height: 8),
+
+          // BOG info
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(10)),
+            child: Row(children: [
+              const Icon(Icons.info_outline, color: Colors.blue, size: 16),
+              const SizedBox(width: 8),
+              Expanded(child: Text('გადახდა BOG ბარათით — უსაფრთხო',
+                  style: TextStyle(color: Colors.blue[700], fontSize: 12))),
+            ]),
+          ),
+          const SizedBox(height: 20),
+
+          // გადახდის ღილაკი
+          SizedBox(width: double.infinity, height: 54,
+              child: ElevatedButton.icon(
+                  icon: const Icon(Icons.payment, color: Colors.white),
+                  label: const Text('გადახდა და გახსნა',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                  style: ElevatedButton.styleFrom(backgroundColor: kGreen,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+                  onPressed: () => Navigator.pop(context, true))),
+          const SizedBox(height: 8),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('გაუქმება', style: TextStyle(color: Colors.grey, fontSize: 14))),
+        ]),
+      ),
+    );
+    return result == true;
   }
 
   Future<void> _startRide() async {
     final battery = int.tryParse(_scooter?['battery']?.toString() ?? '100') ?? 100;
+
+    // 1. ბატარეის შემოწმება
     if (battery < 5) {
       if (mounted) showDialog(context: context, builder: (_) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -613,6 +826,12 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
               child: const Text('გასაგებია', style: TextStyle(color: Colors.white)))]));
       return;
     }
+
+    // 2. ტარიფის confirmation sheet
+    final confirmed = await _showTariffSheet();
+    if (!confirmed) return;
+
+    // 3. ბარათის შემოწმება
     final prefs = await SharedPreferences.getInstance();
     final hasCard = prefs.getBool('has_card') ?? false;
     if (!hasCard) {
@@ -628,38 +847,79 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
                 child: const Text('ბარათის დამატება', style: TextStyle(color: Colors.white)))]));
       return;
     }
+
     setState(()=>_starting=true);
     try {
       final h = await _authHeaders();
       final res = await http.post(Uri.parse('$BASE_URL/api/bog/pay'), headers: h,
           body: jsonEncode({'device_id': widget.deviceId, 'amount': '1.00', 'user_id': prefs.getInt('user_id')??1}));
       final data = jsonDecode(res.body);
+
       if (data['error'] == 'low_battery') {
         setState(()=>_starting=false);
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(backgroundColor: Colors.red[700], content: Text(data['message'] ?? 'ბატარეა ძალიან დაბალია')));
         return;
       }
+
       if (data['error'] == 'no_card') {
         setState(()=>_starting=false);
         if (mounted) Navigator.push(context, _route(const CardScreen()));
         return;
       }
+
+      // 4. BOG redirect URL → WebView-ში ვხსნით (ბრაუზერი არ იხსნება!)
       if (data['success']==true && data['redirect_url']!=null) {
-        final uri = Uri.parse(data['redirect_url'] as String);
-        if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        final tr = await http.post(Uri.parse('$BASE_URL/api/trips/start'), headers: h,
-            body: jsonEncode({'device_id': widget.deviceId, 'user_id': prefs.getInt('user_id')??1}));
-        final td = jsonDecode(tr.body);
-        if (td['success']==true && mounted) {
-          await prefs.setInt('active_trip_id', td['trip_id'] as int);
-          await prefs.setString('active_device_id', widget.deviceId);
-          Navigator.pushAndRemoveUntil(context, _route(ActiveRideScreen(tripId: td['trip_id'] as int, deviceId: widget.deviceId)), (_)=>false);
+        setState(()=>_starting=false);
+        if (!mounted) return;
+        final result = await Navigator.push<bool>(context, MaterialPageRoute<bool>(builder: (_) =>
+            BogWebViewScreen(
+              url: data['redirect_url'] as String,
+              title: 'გადახდა — BOG',
+              onSuccess: () async {
+                // გადახდა წარმატებულია — trip დაიწყება callback-ით ავტომატურად
+              },
+            )
+        ));
+        if (result == true && mounted) {
+          // გადახდა წარმატებულია, დაველოდოთ სერვერის callback-ს
+          setState(()=>_starting=true);
+          await Future.delayed(const Duration(seconds: 2));
+          // trip status შევამოწმოთ
+          final h2 = await _authHeaders();
+          final statusRes = await http.get(
+              Uri.parse('$BASE_URL/api/trips/active?device_id=${widget.deviceId}'), headers: h2);
+          try {
+            final statusData = jsonDecode(statusRes.body);
+            if (statusData['trip_id'] != null && mounted) {
+              await prefs.setInt('active_trip_id', statusData['trip_id'] as int);
+              await prefs.setString('active_device_id', widget.deviceId);
+              Navigator.pushAndRemoveUntil(context,
+                  _route(ActiveRideScreen(tripId: statusData['trip_id'] as int, deviceId: widget.deviceId)),
+                      (_)=>false);
+              return;
+            }
+          } catch (_) {}
+          setState(()=>_starting=false);
         }
+        return;
       }
-    } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('შეცდომა: $e'))); }
-    setState(()=>_starting=false);
+
+      // ბარათი შენახულია — პირდაპირ trip-ი იწყება
+      final tr = await http.post(Uri.parse('$BASE_URL/api/trips/start'), headers: h,
+          body: jsonEncode({'device_id': widget.deviceId, 'user_id': prefs.getInt('user_id')??1}));
+      final td = jsonDecode(tr.body);
+      if (td['success']==true && mounted) {
+        await prefs.setInt('active_trip_id', td['trip_id'] as int);
+        await prefs.setString('active_device_id', widget.deviceId);
+        Navigator.pushAndRemoveUntil(context,
+            _route(ActiveRideScreen(tripId: td['trip_id'] as int, deviceId: widget.deviceId)),
+                (_)=>false);
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('შეცდომა: $e')));
+    }
+    if (mounted) setState(()=>_starting=false);
   }
 
   @override Widget build(BuildContext context) {
@@ -675,7 +935,8 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
               decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20),
                   boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 12)]),
               child: Column(children: [
-                Container(width: 90, height: 90, decoration: BoxDecoration(color: ok ? kGreen.withOpacity(0.1) : Colors.grey.withOpacity(0.1), shape: BoxShape.circle),
+                Container(width: 90, height: 90,
+                    decoration: BoxDecoration(color: ok ? kGreen.withOpacity(0.1) : Colors.grey.withOpacity(0.1), shape: BoxShape.circle),
                     child: Icon(Icons.electric_scooter, size: 52, color: ok ? kGreen : Colors.grey)),
                 const SizedBox(height: 16),
                 Text(widget.deviceId, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: kDark)),
@@ -693,120 +954,316 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
           const SizedBox(height: 20),
           if (ok) SizedBox(width: double.infinity, height: 56,
               child: ElevatedButton.icon(
-                  icon: _starting ? const SizedBox(width:20,height:20,child:CircularProgressIndicator(color:Colors.white,strokeWidth:2)) : const Icon(Icons.payment,color:Colors.white),
-                  label: Text(_starting ? 'მუშავდება...' : 'გადახდა და გახსნა', style: const TextStyle(fontSize:16,fontWeight:FontWeight.bold,color:Colors.white)),
-                  style: ElevatedButton.styleFrom(backgroundColor: kGreen, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+                  icon: _starting
+                      ? const SizedBox(width:20,height:20,child:CircularProgressIndicator(color:Colors.white,strokeWidth:2))
+                      : const Icon(Icons.payment, color: Colors.white),
+                  label: Text(_starting ? 'მუშავდება...' : 'გადახდა და გახსნა',
+                      style: const TextStyle(fontSize:16, fontWeight:FontWeight.bold, color:Colors.white)),
+                  style: ElevatedButton.styleFrom(backgroundColor: kGreen,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
                   onPressed: _starting ? null : _startRide))
           else Container(padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(color: Colors.red.withOpacity(0.08), borderRadius: BorderRadius.circular(14)),
               child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Icon(Icons.block,color:Colors.red), SizedBox(width:8), Text('სქროლი ხელმისაწვდომი არ არის',style:TextStyle(color:Colors.red))])),
+                Icon(Icons.block, color: Colors.red), SizedBox(width: 8),
+                Text('სქროლი ხელმისაწვდომი არ არის', style: TextStyle(color: Colors.red))])),
         ])));
   }
-  Widget _iRow(IconData icon, String label, String value) => Padding(padding: const EdgeInsets.symmetric(vertical:8), child: Row(children: [
-    Icon(icon,color:kGreen,size:20), const SizedBox(width:12),
-    Text(label,style:TextStyle(color:Colors.grey[600],fontSize:14)), const Spacer(),
-    Text(value,style:const TextStyle(fontWeight:FontWeight.w600,color:kDark))]));
+
+  Widget _iRow(IconData icon, String label, String value) =>
+      Padding(padding: const EdgeInsets.symmetric(vertical:8), child: Row(children: [
+        Icon(icon, color:kGreen, size:20), const SizedBox(width:12),
+        Text(label, style:TextStyle(color:Colors.grey[600], fontSize:14)), const Spacer(),
+        Text(value, style:const TextStyle(fontWeight:FontWeight.w600, color:kDark))]));
 }
 
+// ═══════════════════════════════════════════════════════════
+// ACTIVE RIDE SCREEN — Google Maps + GPS + სტატისტიკა
+// ═══════════════════════════════════════════════════════════
 class ActiveRideScreen extends StatefulWidget {
   final int tripId; final String deviceId;
   const ActiveRideScreen({super.key, required this.tripId, required this.deviceId});
   @override State<ActiveRideScreen> createState() => _ActiveRideScreenState();
 }
 class _ActiveRideScreenState extends State<ActiveRideScreen> {
-  int _seconds = 0; Timer? _timer; bool _ending = false;
-  @override void initState() { super.initState(); _timer=Timer.periodic(const Duration(seconds:1),(_)=>setState(()=>_seconds++)); }
-  @override void dispose() { _timer?.cancel(); super.dispose(); }
-  String get _timeStr { final m=_seconds~/60,s=_seconds%60; return '${m.toString().padLeft(2,'0')}:${s.toString().padLeft(2,'0')}'; }
-  double get _cost => (_seconds/60)*0.15;
+  int _seconds = 0;
+  Timer? _timer;
+  Timer? _locationTimer;
+  bool _ending = false;
+
+  GoogleMapController? _mapCtrl;
+  LatLng _currentPos = const LatLng(41.6938, 44.8015);
+  LatLng? _prevPos;
+  double _distanceKm = 0.0;
+  List _geofences = [];
+  final Set<Polygon> _polygons = {};
+  bool _inZone = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) => setState(() => _seconds++));
+    _locationTimer = Timer.periodic(const Duration(seconds: 5), (_) => _updateLocation());
+    _loadGeofences();
+    _updateLocation();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _locationTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadGeofences() async {
+    try {
+      final h = await _authHeaders();
+      final res = await http.get(Uri.parse('$BASE_URL/api/geofences'), headers: h);
+      final d = jsonDecode(res.body);
+      if (d is List) {
+        setState(() => _geofences = d);
+        _rebuildPolygons();
+      }
+    } catch (_) {}
+  }
+
+  void _rebuildPolygons() {
+    final polygons = <Polygon>{};
+    int gi = 0;
+    for (final g in _geofences) {
+      final pts = _parseGeofence(g);
+      if (pts.isEmpty) continue;
+      polygons.add(Polygon(
+        polygonId: PolygonId('geo_$gi'),
+        points: pts,
+        fillColor: kGreen.withOpacity(0.15),
+        strokeColor: kGreen,
+        strokeWidth: 2,
+      ));
+      gi++;
+    }
+    if (mounted) setState(() => _polygons
+      ..clear()
+      ..addAll(polygons));
+  }
+
+  List<LatLng> _parseGeofence(dynamic g) {
+    try {
+      if (g['coordinates'] != null) {
+        final c = jsonDecode(g['coordinates'].toString());
+        if (c is List) return c.map<LatLng>((p) => LatLng(double.parse(p[1].toString()), double.parse(p[0].toString()))).toList();
+      }
+      final lat = double.tryParse(g['latitude']?.toString() ?? '') ?? 41.6938;
+      final lng = double.tryParse(g['longitude']?.toString() ?? '') ?? 44.8015;
+      const r = 0.01;
+      return [LatLng(lat+r,lng-r),LatLng(lat+r,lng+r),LatLng(lat-r,lng+r),LatLng(lat-r,lng-r)];
+    } catch (_) { return []; }
+  }
+
+  Future<void> _updateLocation() async {
+    try {
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
+      if (perm == LocationPermission.denied) return;
+      final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      final newPos = LatLng(pos.latitude, pos.longitude);
+      if (_prevPos != null) {
+        final dist = Geolocator.distanceBetween(
+            _prevPos!.latitude, _prevPos!.longitude,
+            newPos.latitude, newPos.longitude);
+        if (dist > 2) {
+          setState(() => _distanceKm += dist / 1000);
+        }
+      }
+      setState(() {
+        _prevPos = _currentPos;
+        _currentPos = newPos;
+      });
+      _mapCtrl?.animateCamera(CameraUpdate.newLatLng(newPos));
+    } catch (_) {}
+  }
+
+  String get _timeStr {
+    final m = _seconds ~/ 60, s = _seconds % 60;
+    return '${m.toString().padLeft(2,'0')}:${s.toString().padLeft(2,'0')}';
+  }
+  double get _cost => (_seconds / 60) * 0.15;
 
   Future<void> _endRide() async {
     final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('გაქირავების დასრულება'),
-        content: Text('დრო: $_timeStr\nღირებულება: ₾${_cost.toStringAsFixed(2)}\n\nდარწმუნებული ხარ?'),
-        actions: [TextButton(onPressed: ()=>Navigator.pop(context,false), child: const Text('გაგრძელება')),
-          ElevatedButton(onPressed: ()=>Navigator.pop(context,true),
+        title: const Text('მგზავრობის დასრულება'),
+        content: Text('დრო: $_timeStr\nმანძილი: ${_distanceKm.toStringAsFixed(2)} კმ\nღირებულება: ₾${_cost.toStringAsFixed(2)}\n\nდარწმუნებული ხარ?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('გაგრძელება')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true),
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-              child: const Text('დასრულება',style:TextStyle(color:Colors.white)))]));
-    if (ok!=true) return;
-    setState(()=>_ending=true);
+              child: const Text('დასრულება', style: TextStyle(color: Colors.white))),
+        ]));
+    if (ok != true) return;
+    setState(() => _ending = true);
     try {
-      double? lat, lng;
-      try {
-        var perm = await Geolocator.checkPermission();
-        if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
-        if (perm != LocationPermission.denied) {
-          final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-          lat = pos.latitude; lng = pos.longitude;
-        }
-      } catch(_) {}
       final h = await _authHeaders();
-      final body = <String, dynamic>{'trip_id': widget.tripId, 'device_id': widget.deviceId};
-      if (lat != null && lng != null) { body['latitude'] = lat; body['longitude'] = lng; }
+      final body = <String, dynamic>{
+        'trip_id': widget.tripId,
+        'device_id': widget.deviceId,
+        'latitude': _currentPos.latitude,
+        'longitude': _currentPos.longitude,
+      };
       final res = await http.post(Uri.parse('$BASE_URL/api/trips/end'), headers: h, body: jsonEncode(body));
       final data = jsonDecode(res.body);
       if (data['error'] == 'zone_violation') {
-        setState(()=>_ending=false);
+        setState(() => _ending = false);
         if (mounted) showDialog(context: context, builder: (_) => AlertDialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             title: const Row(children: [Icon(Icons.location_off, color: kOrange), SizedBox(width: 8), Flexible(child: Text('ზონის გარეთ ხარ!'))]),
             content: Text('${data['message']}\n\nტარიფი გრძელდება სანამ მწვანე ზონაში არ დაბრუნდები.'),
-            actions: [ElevatedButton(onPressed: ()=>Navigator.pop(context),
+            actions: [ElevatedButton(onPressed: () => Navigator.pop(context),
                 style: ElevatedButton.styleFrom(backgroundColor: kGreen),
                 child: const Text('გავიგე', style: TextStyle(color: Colors.white)))]));
         return;
       }
-      if (data['success']==true) {
+      if (data['success'] == true) {
         final prefs = await SharedPreferences.getInstance();
-        await prefs.remove('active_trip_id'); await prefs.remove('active_device_id');
+        await prefs.remove('active_trip_id');
+        await prefs.remove('active_device_id');
         _timer?.cancel();
+        _locationTimer?.cancel();
         if (mounted) showDialog(context: context, barrierDismissible: false, builder: (_) => AlertDialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: const Row(children:[Icon(Icons.check_circle,color:kGreen),SizedBox(width:8),Text('გაქირავება დასრულდა')]),
+            title: const Row(children: [Icon(Icons.check_circle, color: kGreen), SizedBox(width: 8), Text('მგზავრობა დასრულდა')]),
             content: Text('დრო: ${data['minutes']} წუთი\nგადახდილი: ₾${data['amount']}'),
-            actions: [ElevatedButton(onPressed: ()=>Navigator.pushAndRemoveUntil(context,_route(const MainScreen()),(_)=>false),
-                style: ElevatedButton.styleFrom(backgroundColor:kGreen),
-                child: const Text('დახურვა',style:TextStyle(color:Colors.white)))]));
+            actions: [ElevatedButton(
+                onPressed: () => Navigator.pushAndRemoveUntil(context, _route(const MainScreen()), (_) => false),
+                style: ElevatedButton.styleFrom(backgroundColor: kGreen),
+                child: const Text('დახურვა', style: TextStyle(color: Colors.white)))]));
       }
-    } catch (_) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('შეცდომა — სცადე ახლიდან'))); }
-    setState(()=>_ending=false);
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('შეცდომა — სცადე ახლიდან')));
+    }
+    if (mounted) setState(() => _ending = false);
   }
 
-  @override Widget build(BuildContext context) => Scaffold(backgroundColor: kDark,
-      body: SafeArea(child: Padding(padding: const EdgeInsets.all(24), child: Column(children: [
-        const SizedBox(height:20),
-        Container(width:120,height:120, decoration:BoxDecoration(color:kGreen.withOpacity(0.15),shape:BoxShape.circle,border:Border.all(color:kGreen,width:2)),
-            child:const Icon(Icons.electric_scooter,size:64,color:kGreen)),
-        const SizedBox(height:24),
-        const Text('გაქირავება მიმდინარეობს',style:TextStyle(color:Colors.white70,fontSize:16)),
-        const SizedBox(height:8),
-        Text(widget.deviceId,style:const TextStyle(color:Colors.white,fontSize:20,fontWeight:FontWeight.bold)),
-        const SizedBox(height:40),
-        Container(padding:const EdgeInsets.all(28),
-            decoration:BoxDecoration(color:Colors.white.withOpacity(0.05),borderRadius:BorderRadius.circular(24),border:Border.all(color:Colors.white.withOpacity(0.1))),
-            child:Column(children:[
-              Text(_timeStr,style:const TextStyle(color:Colors.white,fontSize:56,fontWeight:FontWeight.bold,letterSpacing:4)),
-              const SizedBox(height:8), const Text('წუთი : წამი',style:TextStyle(color:Colors.white38,fontSize:13))])),
-        const SizedBox(height:24),
-        Container(padding:const EdgeInsets.all(20),
-            decoration:BoxDecoration(color:kGreen.withOpacity(0.1),borderRadius:BorderRadius.circular(16),border:Border.all(color:kGreen.withOpacity(0.3))),
-            child:Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
-              const Text('მიმდინარე ღირებულება',style:TextStyle(color:Colors.white70)),
-              Text('₾${_cost.toStringAsFixed(2)}',style:const TextStyle(color:kGreen,fontSize:24,fontWeight:FontWeight.bold))])),
-        const SizedBox(height:16),
-        Text('₾0.15 / წუთი',style:TextStyle(color:Colors.white.withOpacity(0.4),fontSize:13)),
-        const Spacer(),
-        SizedBox(width:double.infinity,height:58,
-            child:ElevatedButton.icon(
-                icon:_ending?const SizedBox(width:20,height:20,child:CircularProgressIndicator(color:Colors.white,strokeWidth:2)):const Icon(Icons.stop_circle,color:Colors.white,size:24),
-                label:Text(_ending?'მუშავდება...':'გაქირავების დასრულება',style:const TextStyle(fontSize:16,fontWeight:FontWeight.bold,color:Colors.white)),
-                style:ElevatedButton.styleFrom(backgroundColor:Colors.red[600],shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(16))),
-                onPressed:_ending?null:_endRide)),
-      ]))));
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Column(children: [
+        // ══ Google Maps ══
+        Expanded(
+          child: Stack(children: [
+            GoogleMap(
+              initialCameraPosition: CameraPosition(target: _currentPos, zoom: 16),
+              onMapCreated: (c) => _mapCtrl = c,
+              myLocationEnabled: true,
+              myLocationButtonEnabled: false,
+              zoomControlsEnabled: false,
+              compassEnabled: true,
+              polygons: _polygons,
+              markers: {
+                Marker(
+                  markerId: const MarkerId('scooter'),
+                  position: _currentPos,
+                  icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+                ),
+              },
+            ),
+            // ზედა badge — მიმდინარეობს
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 12,
+              left: 16,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                    color: kDark.withOpacity(0.85),
+                    borderRadius: BorderRadius.circular(20)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Container(width: 8, height: 8, decoration: const BoxDecoration(color: kGreen, shape: BoxShape.circle)),
+                  const SizedBox(width: 8),
+                  Text(widget.deviceId, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                ]),
+              ),
+            ),
+            // ზონის სტატუსი
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 12,
+              right: 16,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                    color: _inZone ? kGreen.withOpacity(0.9) : kOrange.withOpacity(0.9),
+                    borderRadius: BorderRadius.circular(20)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(_inZone ? Icons.check_circle : Icons.warning, color: Colors.white, size: 14),
+                  const SizedBox(width: 6),
+                  Text(_inZone ? 'ზონაშია' : 'ზონის გარეთ!',
+                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                ]),
+              ),
+            ),
+          ]),
+        ),
+
+        // ══ სტატისტიკა + ღილაკი ══
+        Container(
+          color: kDark,
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          child: Column(children: [
+            // 3 სტატისტიკა
+            Row(children: [
+              _statCard('დრო', _timeStr, 'წთ:წმ', Icons.access_time),
+              const SizedBox(width: 8),
+              _statCard('მანძილი', _distanceKm.toStringAsFixed(2), 'კმ', Icons.route),
+              const SizedBox(width: 8),
+              _statCard('ღირებულება', '₾${_cost.toStringAsFixed(2)}', '0.15/წთ', Icons.attach_money, green: true),
+            ]),
+            const SizedBox(height: 12),
+            // დასრულების ღილაკი
+            SafeArea(
+              top: false,
+              child: SizedBox(
+                width: double.infinity,
+                height: 54,
+                child: ElevatedButton.icon(
+                    icon: _ending
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Icon(Icons.stop_circle, color: Colors.white, size: 22),
+                    label: Text(
+                        _ending ? 'მუშავდება...' : 'მგზავრობის დასრულება',
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red[600],
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+                    onPressed: _ending ? null : _endRide),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  Widget _statCard(String label, String value, String unit, IconData icon, {bool green = false}) =>
+      Expanded(child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+        decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.07),
+            borderRadius: BorderRadius.circular(12)),
+        child: Column(children: [
+          Icon(icon, color: green ? kGreen : Colors.white54, size: 18),
+          const SizedBox(height: 4),
+          Text(value, style: TextStyle(
+              color: green ? kGreen : Colors.white,
+              fontSize: 16, fontWeight: FontWeight.bold)),
+          Text(unit, style: const TextStyle(color: Colors.white38, fontSize: 9)),
+          Text(label, style: const TextStyle(color: Colors.white54, fontSize: 10)),
+        ]),
+      ));
 }
 
+// ═══════════════════════════════════════════════════════════
+// TRIPS SCREEN
+// ═══════════════════════════════════════════════════════════
 class TripsScreen extends StatefulWidget {
   const TripsScreen({super.key});
   @override State<TripsScreen> createState() => _TripsScreenState();
@@ -851,6 +1308,9 @@ class _TripsScreenState extends State<TripsScreen> {
       }));
 }
 
+// ═══════════════════════════════════════════════════════════
+// MENU SCREEN
+// ═══════════════════════════════════════════════════════════
 class MenuScreen extends StatefulWidget {
   const MenuScreen({super.key});
   @override State<MenuScreen> createState() => _MenuScreenState();
@@ -926,15 +1386,15 @@ class _MenuScreenState extends State<MenuScreen> {
         ]),
         const SizedBox(height: 12),
         _section([
-          _tile(Icons.privacy_tip_outlined,     'Privacy Policy', onTap: () => _openUrl('$BASE_URL/privacy')),
+          _tile(Icons.privacy_tip_outlined,     'Privacy Policy',  onTap: () => _openUrl('$BASE_URL/privacy')),
           _div(),
-          _tile(Icons.chat_bubble_outline,      'Live Chat',      onTap: () => _openUrl('https://wa.me/995568877899')),
+          _tile(Icons.chat_bubble_outline,      'Live Chat',       onTap: () => _openUrl('https://wa.me/995568877899')),
           _div(),
-          _tile(Icons.help_outline,             'FAQ',            onTap: () => Navigator.push(context, _route(FaqScreen()))),
+          _tile(Icons.help_outline,             'FAQ',             onTap: () => Navigator.push(context, _route(FaqScreen()))),
           _div(),
-          _tile(Icons.shield_outlined,          'Safety',         onTap: () => Navigator.push(context, _route(SafetyScreen()))),
+          _tile(Icons.shield_outlined,          'Safety',          onTap: () => Navigator.push(context, _route(SafetyScreen()))),
           _div(),
-          _tile(Icons.directions_bike_outlined, 'How to Ride',    onTap: () => Navigator.push(context, _route(HowToRideScreen()))),
+          _tile(Icons.directions_bike_outlined, 'How to Ride',     onTap: () => Navigator.push(context, _route(HowToRideScreen()))),
         ]),
         const SizedBox(height: 12),
         _section([_tile(Icons.logout, 'გამოსვლა', color: Colors.red, onTap: _logout)]),
@@ -971,6 +1431,9 @@ class _MenuScreenState extends State<MenuScreen> {
       child: Text(text, style: TextStyle(color:color,fontSize:11,fontWeight:FontWeight.w600)));
 }
 
+// ═══════════════════════════════════════════════════════════
+// ACCOUNT SETTINGS SCREEN
+// ═══════════════════════════════════════════════════════════
 class AccountSettingsScreen extends StatefulWidget {
   final VoidCallback? onUpdate;
   const AccountSettingsScreen({super.key, this.onUpdate});
@@ -981,8 +1444,12 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
   @override void initState() { super.initState(); _load(); }
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
-    setState(() { _username=prefs.getString('username')??'—'; _email=prefs.getString('email')??'';
-    _photoUrl=prefs.getString('photo_url')??''; _verified=prefs.getBool('verified')??false; });
+    setState(() {
+      _username=prefs.getString('username')??'—';
+      _email=prefs.getString('email')??'';
+      _photoUrl=prefs.getString('photo_url')??'';
+      _verified=prefs.getBool('verified')??false;
+    });
   }
   @override Widget build(BuildContext context) => Scaffold(backgroundColor: kBg,
       appBar: AppBar(backgroundColor: kDark,
@@ -1022,6 +1489,9 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
       subtitle: Text(value,style:const TextStyle(color:kDark,fontWeight:FontWeight.w500,fontSize:15)));
 }
 
+// ═══════════════════════════════════════════════════════════
+// CARD SCREEN — განახლებული WebView-ით
+// ═══════════════════════════════════════════════════════════
 class CardScreen extends StatefulWidget {
   const CardScreen({super.key});
   @override State<CardScreen> createState() => _CardScreenState();
@@ -1029,6 +1499,7 @@ class CardScreen extends StatefulWidget {
 class _CardScreenState extends State<CardScreen> {
   bool _loading=false, _hasCard=false; Map? _cardInfo;
   @override void initState() { super.initState(); _loadCard(); }
+
   Future<void> _loadCard() async {
     setState(()=>_loading=true);
     try {
@@ -1037,8 +1508,9 @@ class _CardScreenState extends State<CardScreen> {
       final d = jsonDecode(res.body);
       if (mounted) setState(() { _hasCard=d['has_card']==true; _cardInfo=d['card']; });
     } catch (_) {}
-    setState(()=>_loading=false);
+    if (mounted) setState(()=>_loading=false);
   }
+
   Future<void> _addCard() async {
     setState(()=>_loading=true);
     try {
@@ -1046,11 +1518,35 @@ class _CardScreenState extends State<CardScreen> {
       final res = await http.post(Uri.parse('$BASE_URL/api/bog/save-card'), headers: h,
           body: jsonEncode({'return_url': '$BASE_URL/card-success'}));
       final d = jsonDecode(res.body);
-      if (d['redirect_url']!=null) { final uri=Uri.parse(d['redirect_url'] as String); if (await canLaunchUrl(uri)) await launchUrl(uri,mode:LaunchMode.externalApplication); }
-      else { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('სერვერის შეცდომა'))); }
-    } catch (_) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('კავშირის შეცდომა'))); }
-    setState(()=>_loading=false);
+      if (d['redirect_url']!=null) {
+        setState(()=>_loading=false);
+        if (!mounted) return;
+        // WebView-ში ვხსნით — ბრაუზერი არ იხსნება!
+        final result = await Navigator.push<bool>(context, MaterialPageRoute<bool>(builder: (_) =>
+            BogWebViewScreen(
+              url: d['redirect_url'] as String,
+              title: 'ბარათის დამატება — BOG',
+              onSuccess: () async {
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setBool('has_card', true);
+              },
+            )
+        ));
+        if (result == true) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('has_card', true);
+          await _loadCard();
+        }
+        return;
+      } else {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('სერვერის შეცდომა')));
+      }
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('კავშირის შეცდომა')));
+    }
+    if (mounted) setState(()=>_loading=false);
   }
+
   Future<void> _removeCard() async {
     final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
         title: const Text('ბარათის წაშლა'), content: const Text('დარწმუნებული ხარ?'),
@@ -1065,8 +1561,9 @@ class _CardScreenState extends State<CardScreen> {
       final prefs = await SharedPreferences.getInstance(); await prefs.setBool('has_card',false);
       await _loadCard();
     } catch (_) {}
-    setState(()=>_loading=false);
+    if (mounted) setState(()=>_loading=false);
   }
+
   @override Widget build(BuildContext context) => Scaffold(backgroundColor: kBg,
       appBar: AppBar(backgroundColor: kDark,
           title: const Text('Wallet & Payments',style:TextStyle(color:Colors.white)),
@@ -1118,6 +1615,9 @@ class _CardScreenState extends State<CardScreen> {
       ])));
 }
 
+// ═══════════════════════════════════════════════════════════
+// FAQ SCREEN
+// ═══════════════════════════════════════════════════════════
 class FaqScreen extends StatelessWidget {
   const FaqScreen({super.key});
   static final _faqs = [
@@ -1143,6 +1643,9 @@ class FaqScreen extends StatelessWidget {
       }));
 }
 
+// ═══════════════════════════════════════════════════════════
+// SAFETY SCREEN
+// ═══════════════════════════════════════════════════════════
 class SafetyScreen extends StatelessWidget {
   const SafetyScreen({super.key});
   static final _rules = [
@@ -1161,15 +1664,21 @@ class SafetyScreen extends StatelessWidget {
             decoration:BoxDecoration(color:kGreen.withOpacity(0.08),borderRadius:BorderRadius.circular(14),border:Border.all(color:kGreen.withOpacity(0.2))),
             child:const Row(children:[Icon(Icons.shield,color:kGreen),SizedBox(width:12),
               Expanded(child:Text('შენი უსაფრთხოება ჩვენთვის პრიორიტეტია.',style:TextStyle(color:kGreen,fontWeight:FontWeight.w600)))])),
-        ..._rules.map((r){final icon=r.$1; final title=r.$2; final desc=r.$3; return Container(margin:const EdgeInsets.only(bottom:10),padding:const EdgeInsets.all(16),
-            decoration:BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(14),boxShadow:[BoxShadow(color:Colors.black.withOpacity(0.04),blurRadius:8)]),
-            child:Row(children:[Container(width:44,height:44,decoration:BoxDecoration(color:kGreen.withOpacity(0.1),shape:BoxShape.circle),child:Icon(icon,color:kGreen,size:22)),
-              const SizedBox(width:14),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-                Text(title,style:const TextStyle(fontWeight:FontWeight.bold,color:kDark)),const SizedBox(height:2),
-                Text(desc,style:TextStyle(color:Colors.grey[600],fontSize:13))]))]));})
+        ..._rules.map((r){
+          final icon=r.$1; final title=r.$2; final desc=r.$3;
+          return Container(margin:const EdgeInsets.only(bottom:10),padding:const EdgeInsets.all(16),
+              decoration:BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(14),boxShadow:[BoxShadow(color:Colors.black.withOpacity(0.04),blurRadius:8)]),
+              child:Row(children:[Container(width:44,height:44,decoration:BoxDecoration(color:kGreen.withOpacity(0.1),shape:BoxShape.circle),child:Icon(icon,color:kGreen,size:22)),
+                const SizedBox(width:14),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+                  Text(title,style:const TextStyle(fontWeight:FontWeight.bold,color:kDark)),const SizedBox(height:2),
+                  Text(desc,style:TextStyle(color:Colors.grey[600],fontSize:13))]))]));
+        })
       ]));
 }
 
+// ═══════════════════════════════════════════════════════════
+// HOW TO RIDE SCREEN
+// ═══════════════════════════════════════════════════════════
 class HowToRideScreen extends StatelessWidget {
   const HowToRideScreen({super.key});
   static final _steps = [
