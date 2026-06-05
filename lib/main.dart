@@ -882,25 +882,36 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
             )
         ));
         if (result == true && mounted) {
-          // გადახდა წარმატებულია, დაველოდოთ სერვერის callback-ს
+          // გადახდა წარმატებულია, ვიწყებთ polling-ს trip status-ისთვის
           setState(()=>_starting=true);
-          await Future.delayed(const Duration(seconds: 2));
-          // trip status შევამოწმოთ
-          final h2 = await _authHeaders();
-          final statusRes = await http.get(
-              Uri.parse('$BASE_URL/api/trips/active?device_id=${widget.deviceId}'), headers: h2);
-          try {
-            final statusData = jsonDecode(statusRes.body);
-            if (statusData['trip_id'] != null && mounted) {
-              await prefs.setInt('active_trip_id', statusData['trip_id'] as int);
-              await prefs.setString('active_device_id', widget.deviceId);
-              Navigator.pushAndRemoveUntil(context,
-                  _route(ActiveRideScreen(tripId: statusData['trip_id'] as int, deviceId: widget.deviceId)),
-                      (_)=>false);
-              return;
-            }
-          } catch (_) {}
+          // 5 ცდა, ყოველ 2 წამში — callback-ს ვაცდით (10 წამამდე)
+          Map<String, dynamic>? statusData;
+          for (int i = 0; i < 5; i++) {
+            await Future.delayed(const Duration(seconds: 2));
+            try {
+              final h2 = await _authHeaders();
+              final statusRes = await http.get(
+                  Uri.parse('$BASE_URL/api/trips/active'), headers: h2);
+              final d = jsonDecode(statusRes.body);
+              if (d['active'] == true && d['trip_id'] != null) {
+                statusData = Map<String, dynamic>.from(d as Map);
+                break;
+              }
+            } catch (_) {}
+          }
+          if (statusData != null && mounted) {
+            await prefs.setInt('active_trip_id', statusData['trip_id'] as int);
+            await prefs.setString('active_device_id', widget.deviceId);
+            Navigator.pushAndRemoveUntil(context,
+                _route(ActiveRideScreen(tripId: statusData['trip_id'] as int, deviceId: widget.deviceId)),
+                    (_)=>false);
+            return;
+          }
           setState(()=>_starting=false);
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('გადახდა გავიდა, მაგრამ მგზავრობა ვერ დაიწყო. სცადე ისტორიის ტაბი.'),
+            backgroundColor: Colors.orange,
+          ));
         }
         return;
       }
@@ -1262,7 +1273,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
 }
 
 // ═══════════════════════════════════════════════════════════
-// TRIPS SCREEN
+// TRIPS SCREEN — active trip-ზე tap → ActiveRideScreen
 // ═══════════════════════════════════════════════════════════
 class TripsScreen extends StatefulWidget {
   const TripsScreen({super.key});
@@ -1279,6 +1290,18 @@ class _TripsScreenState extends State<TripsScreen> {
       setState(() { _trips=d is List?d:(d['trips']??[]); _loading=false; });
     } catch (_) { setState(()=>_loading=false); }
   }
+
+  Future<void> _openActiveTrip(Map t) async {
+    final prefs = await SharedPreferences.getInstance();
+    final tripId = t['id'] is int ? t['id'] as int : int.parse(t['id'].toString());
+    final deviceId = t['device_id']?.toString() ?? '';
+    await prefs.setInt('active_trip_id', tripId);
+    await prefs.setString('active_device_id', deviceId);
+    if (mounted) Navigator.pushAndRemoveUntil(context,
+        _route(ActiveRideScreen(tripId: tripId, deviceId: deviceId)),
+            (_)=>false);
+  }
+
   @override Widget build(BuildContext context) => Scaffold(backgroundColor: kBg,
       appBar: AppBar(backgroundColor: kDark, automaticallyImplyLeading: false,
           title: const Text('ჩემი მოგზაურობები',style:TextStyle(color:Colors.white)),
@@ -1289,22 +1312,38 @@ class _TripsScreenState extends State<TripsScreen> {
         Text('მოგზაურობები ჯერ არ გაქვს',style:TextStyle(color:Colors.grey[500],fontSize:16)),
         const SizedBox(height:8),Text('QR სკანირებით დაიწყე!',style:TextStyle(color:Colors.grey[400],fontSize:13))]))
           :ListView.builder(padding:const EdgeInsets.all(16),itemCount:_trips.length,itemBuilder:(_,i){
-        final t=_trips[i]; final done=t['status']=='completed';
-        return Container(margin:const EdgeInsets.only(bottom:12),padding:const EdgeInsets.all(16),
+        final t=_trips[i];
+        final done=t['status']=='completed';
+        final active = t['status']=='active';
+        return Container(margin:const EdgeInsets.only(bottom:12),
             decoration:BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(14),
                 boxShadow:[BoxShadow(color:Colors.black.withOpacity(0.04),blurRadius:8)]),
-            child:Row(children:[
-              Container(width:48,height:48,decoration:BoxDecoration(color:kGreen.withOpacity(0.1),shape:BoxShape.circle),
-                  child:const Icon(Icons.electric_scooter,color:kGreen)),
-              const SizedBox(width:14),
-              Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-                Text(t['device_id']??'—',style:const TextStyle(fontWeight:FontWeight.bold,color:kDark)),
-                if(t['duration_minutes']!=null)Text('${t['duration_minutes']} წუთი',style:TextStyle(color:Colors.grey[500],fontSize:12)),
-                Text('₾${t['amount_paid']??0}',style:const TextStyle(color:kGreen,fontWeight:FontWeight.w600))])),
-              Container(padding:const EdgeInsets.symmetric(horizontal:10,vertical:4),
-                  decoration:BoxDecoration(color:done?kGreen.withOpacity(0.1):kOrange.withOpacity(0.1),borderRadius:BorderRadius.circular(8)),
-                  child:Text(done?'დასრულდა':(t['status']??'—'),
-                      style:TextStyle(color:done?kGreen:kOrange,fontSize:12,fontWeight:FontWeight.w600)))]));
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(14),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: active ? () => _openActiveTrip(t) : null,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(children:[
+                    Container(width:48,height:48,decoration:BoxDecoration(color:kGreen.withOpacity(0.1),shape:BoxShape.circle),
+                        child:const Icon(Icons.electric_scooter,color:kGreen)),
+                    const SizedBox(width:14),
+                    Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+                      Text(t['device_id']??'—',style:const TextStyle(fontWeight:FontWeight.bold,color:kDark)),
+                      if(t['duration_minutes']!=null)Text('${t['duration_minutes']} წუთი',style:TextStyle(color:Colors.grey[500],fontSize:12)),
+                      Text('₾${t['amount_paid']??0}',style:const TextStyle(color:kGreen,fontWeight:FontWeight.w600))])),
+                    Container(padding:const EdgeInsets.symmetric(horizontal:10,vertical:4),
+                        decoration:BoxDecoration(color:done?kGreen.withOpacity(0.1):kOrange.withOpacity(0.1),borderRadius:BorderRadius.circular(8)),
+                        child:Text(done?'დასრულდა':(t['status']??'—'),
+                            style:TextStyle(color:done?kGreen:kOrange,fontSize:12,fontWeight:FontWeight.w600))),
+                    if (active) const Padding(padding: EdgeInsets.only(left: 8),
+                        child: Icon(Icons.arrow_forward_ios, size: 14, color: kOrange)),
+                  ]),
+                ),
+              ),
+            ));
       }));
 }
 
