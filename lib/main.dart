@@ -14,13 +14,21 @@ import 'dart:convert';
 import 'dart:async';
 
 const String BASE_URL    = 'https://velocar.ge';
-const String APP_VERSION = '1.0.0';
+const String APP_VERSION = '1.0.1';
 
 const kGreen      = Color(0xFF2E9E6B);
 const kGreenLight = Color(0xFF4CAF80);
 const kOrange     = Color(0xFFF07C2A);
 const kDark       = Color(0xFF1A2B22);
 const kBg         = Color(0xFFF4F6F4);
+
+// ─── Vehicle type metadata (used across screens) ───
+const Map<String, String> kTypeIcons = {
+  'scooter': '🛴', 'bike': '🚲', 'ebike': '⚡', 'moped': '🛵', 'car': '🚗',
+};
+const Map<String, String> kTypeNames = {
+  'scooter': 'სქროლი', 'bike': 'ველო', 'ebike': 'ელ. ველო', 'moped': 'მოპედი', 'car': 'მანქანა',
+};
 
 final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: ['email', 'profile'], serverClientId: '76613972502-652obdjh6ipvsi4ftp0cms8nn2fuaamv.apps.googleusercontent.com');
 
@@ -214,14 +222,12 @@ class _BogWebViewScreenState extends State<BogWebViewScreen> {
         onPageStarted: (_) => setState(() => _loading = true),
         onPageFinished: (url) {
           setState(() => _loading = false);
-          // წარმატებული გადახდის შემდეგ BOG გადამისამართებს callback URL-ზე
           if (url.contains('velocar.ge/api/bog/callback') ||
               url.contains('velocar.ge/payment/success') ||
               url.contains('card-success')) {
             widget.onSuccess?.call();
             Navigator.pop(context, true);
           }
-          // წარუმატებელი გადახდა
           if (url.contains('payment/fail')) {
             Navigator.pop(context, false);
           }
@@ -270,6 +276,7 @@ class _SplashScreenState extends State<SplashScreen> {
     final deviceId = prefs.getString('active_device_id');
     if (!mounted) return;
     if (tripId != null && deviceId != null) {
+      // active trip-ის გაგრძელება — pricing fetch-დება ActiveRideScreen-ში
       Navigator.pushReplacement(context, _route(ActiveRideScreen(tripId: tripId, deviceId: deviceId)));
     } else if (token != null && token.isNotEmpty) {
       await PushNotificationService.resendToken();
@@ -423,7 +430,7 @@ class _MainScreenState extends State<MainScreen> {
                 backgroundColor: Colors.white, selectedItemColor: kGreen, unselectedItemColor: Colors.grey[400],
                 selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                 items: const [
-                  BottomNavigationBarItem(icon: Icon(Icons.electric_scooter_outlined), activeIcon: Icon(Icons.electric_scooter), label: 'სქროლი'),
+                  BottomNavigationBarItem(icon: Icon(Icons.map_outlined), activeIcon: Icon(Icons.map), label: 'რუკა'),
                   BottomNavigationBarItem(icon: Icon(Icons.history_outlined), activeIcon: Icon(Icons.history), label: 'ისტორია'),
                   BottomNavigationBarItem(icon: Icon(Icons.menu), activeIcon: Icon(Icons.menu_open), label: 'მენიუ'),
                 ])));
@@ -431,7 +438,7 @@ class _MainScreenState extends State<MainScreen> {
 }
 
 // ═══════════════════════════════════════════════════════════
-// MAP HOME SCREEN
+// MAP HOME SCREEN — GPS default + Vehicle filter + Dynamic pricing
 // ═══════════════════════════════════════════════════════════
 class MapHomeScreen extends StatefulWidget {
   const MapHomeScreen({super.key});
@@ -439,50 +446,65 @@ class MapHomeScreen extends StatefulWidget {
 }
 class _MapHomeScreenState extends State<MapHomeScreen> {
   List _scooters = [], _geofences = [];
-  LatLng _center = const LatLng(41.6938, 44.8015);
+  LatLng _center = const LatLng(41.6938, 44.8015); // ფოლბექი — თბილისი
   GoogleMapController? _mapCtrl;
   final Set<Marker> _markers = {};
   final Set<Polygon> _polygons = {};
+  String _filterType = 'all'; // 'all' | 'scooter' | 'bike' | 'ebike' | 'moped' | 'car'
+  bool _gpsLoaded = false;
+  bool _gpsApplied = false;
 
-  @override void initState() { super.initState(); _loadData(); _getLocation(); }
+  @override void initState() { super.initState(); _getLocation(); _loadData(); }
 
   Future<void> _getLocation() async {
     try {
       if (!await Geolocator.isLocationServiceEnabled()) return;
       var p = await Geolocator.checkPermission();
       if (p == LocationPermission.denied) p = await Geolocator.requestPermission();
-      if (p == LocationPermission.denied) return;
+      if (p == LocationPermission.denied || p == LocationPermission.deniedForever) return;
       final pos = await Geolocator.getCurrentPosition();
-      setState(() => _center = LatLng(pos.latitude, pos.longitude));
-      _mapCtrl?.animateCamera(CameraUpdate.newLatLngZoom(_center, 15));
+      if (!mounted) return;
+      setState(() {
+        _center = LatLng(pos.latitude, pos.longitude);
+        _gpsLoaded = true;
+      });
+      _applyInitialCamera();
     } catch (_) {}
+  }
+
+  // GPS-ი და map controller-ი ერთმანეთს ელოდებიან — ვინც ბოლოს მოვა, ის გადააფარებს კამერას
+  void _applyInitialCamera() {
+    if (_mapCtrl != null && _gpsLoaded && !_gpsApplied) {
+      _gpsApplied = true;
+      _mapCtrl!.animateCamera(CameraUpdate.newLatLngZoom(_center, 15));
+    }
   }
 
   Future<void> _loadData() async {
     try {
       final h = await _authHeaders();
       final r1 = await http.get(Uri.parse('$BASE_URL/api/scooters'), headers: h);
-      final d1 = jsonDecode(r1.body); if (d1 is List) setState(() => _scooters = d1);
+      final d1 = jsonDecode(r1.body);
+      if (d1 is List) setState(() => _scooters = d1);
       final r2 = await http.get(Uri.parse('$BASE_URL/api/geofences'), headers: h);
-      final d2 = jsonDecode(r2.body); if (d2 is List) setState(() => _geofences = d2);
+      final d2 = jsonDecode(r2.body);
+      if (d2 is List) setState(() => _geofences = d2);
       _rebuildOverlays();
     } catch (_) {}
   }
 
-  Future<BitmapDescriptor> _scooterIcon(bool ok) async {
-    return BitmapDescriptor.defaultMarkerWithHue(ok ? BitmapDescriptor.hueGreen : BitmapDescriptor.hueOrange);
-  }
-
   void _rebuildOverlays() async {
     final markers = <Marker>{};
-    for (final s in _scooters) {
+    final filtered = _filterType == 'all'
+        ? _scooters
+        : _scooters.where((s) => (s['vehicle_type']?.toString() ?? 'scooter') == _filterType).toList();
+    for (final s in filtered) {
       if (s['latitude'] == null || s['longitude'] == null) continue;
       final ok = s['status'] == 'available';
-      final icon = await _scooterIcon(ok);
       markers.add(Marker(
         markerId: MarkerId(s['device_id']?.toString() ?? s['id'].toString()),
         position: LatLng(double.parse(s['latitude'].toString()), double.parse(s['longitude'].toString())),
-        icon: icon,
+        icon: BitmapDescriptor.defaultMarkerWithHue(ok ? BitmapDescriptor.hueGreen : BitmapDescriptor.hueOrange),
         onTap: () => _showInfo(context, s),
       ));
     }
@@ -518,59 +540,154 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
     } catch (_) { return []; }
   }
 
-  @override Widget build(BuildContext context) => Scaffold(body: Stack(children: [
-    GoogleMap(
-      initialCameraPosition: CameraPosition(target: _center, zoom: 14),
-      onMapCreated: (c) { _mapCtrl = c; },
-      myLocationEnabled: true, myLocationButtonEnabled: false, zoomControlsEnabled: false,
-      markers: _markers, polygons: _polygons,
-    ),
-    Positioned(top: 0, left: 0, right: 0,
-        child: Container(
-            decoration: BoxDecoration(gradient: LinearGradient(colors: [kDark, kDark.withOpacity(0)], begin: Alignment.topCenter, end: Alignment.bottomCenter)),
-            padding: EdgeInsets.fromLTRB(20, MediaQuery.of(context).padding.top+12, 20, 20),
-            child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              const Text('VELOCAR', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2)),
-              Container(decoration: BoxDecoration(color: Colors.white.withOpacity(0.15), borderRadius: BorderRadius.circular(10)),
-                  child: IconButton(icon: const Icon(Icons.refresh, color: Colors.white, size: 20), onPressed: _loadData)),
-            ]))),
-    Positioned(bottom: 20, left: 20, right: 20, child: Column(children: [
-      Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12),
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 10)]),
-          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            const Icon(Icons.electric_scooter, color: kGreen, size: 18), const SizedBox(width: 8),
-            Text('${_scooters.where((s) => s['status']=='available').length} სქროლი ხელმისაწვდომია',
-                style: const TextStyle(fontWeight: FontWeight.w600, color: kDark))])),
-      const SizedBox(height: 12),
-      SizedBox(width: double.infinity, height: 58,
-          child: ElevatedButton.icon(icon: const Icon(Icons.qr_code_scanner, color: Colors.white, size: 24),
-              label: const Text('სქროლის სკანირება', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-              style: ElevatedButton.styleFrom(backgroundColor: kGreen, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), elevation: 4),
-              onPressed: () => Navigator.push(context, _route(const QRScanScreen())))),
-    ])),
-  ]));
+  void _setFilter(String type) {
+    setState(() => _filterType = type);
+    _rebuildOverlays();
+  }
+
+  Future<void> _centerOnMe() async {
+    try {
+      final pos = await Geolocator.getCurrentPosition();
+      _mapCtrl?.animateCamera(CameraUpdate.newLatLngZoom(LatLng(pos.latitude, pos.longitude), 16));
+    } catch (_) {}
+  }
+
+  @override Widget build(BuildContext context) {
+    final filteredScooters = _filterType == 'all'
+        ? _scooters
+        : _scooters.where((s) => (s['vehicle_type']?.toString() ?? 'scooter') == _filterType).toList();
+    final availableCount = filteredScooters.where((s) => s['status'] == 'available').length;
+    final filterLabel = _filterType == 'all' ? 'მოწყობილობა' : (kTypeNames[_filterType] ?? '');
+
+    return Scaffold(body: Stack(children: [
+      GoogleMap(
+        initialCameraPosition: CameraPosition(target: _center, zoom: 14),
+        onMapCreated: (c) { _mapCtrl = c; _applyInitialCamera(); },
+        myLocationEnabled: true, myLocationButtonEnabled: false, zoomControlsEnabled: false,
+        markers: _markers, polygons: _polygons,
+      ),
+      // ── ზედა bar ──
+      Positioned(top: 0, left: 0, right: 0,
+          child: Container(
+              decoration: BoxDecoration(gradient: LinearGradient(colors: [kDark, kDark.withOpacity(0)], begin: Alignment.topCenter, end: Alignment.bottomCenter)),
+              padding: EdgeInsets.fromLTRB(16, MediaQuery.of(context).padding.top+12, 16, 20),
+              child: Column(children: [
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  const Text('VELOCAR', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2)),
+                  Container(decoration: BoxDecoration(color: Colors.white.withOpacity(0.15), borderRadius: BorderRadius.circular(10)),
+                      child: IconButton(icon: const Icon(Icons.refresh, color: Colors.white, size: 20), onPressed: _loadData)),
+                ]),
+                const SizedBox(height: 10),
+                // ── Vehicle type filter chips ──
+                SizedBox(
+                  height: 38,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      _filterChip('all', '🌟', 'ყველა'),
+                      const SizedBox(width: 8),
+                      _filterChip('scooter', kTypeIcons['scooter']!, kTypeNames['scooter']!),
+                      const SizedBox(width: 8),
+                      _filterChip('bike', kTypeIcons['bike']!, kTypeNames['bike']!),
+                      const SizedBox(width: 8),
+                      _filterChip('ebike', kTypeIcons['ebike']!, kTypeNames['ebike']!),
+                      const SizedBox(width: 8),
+                      _filterChip('moped', kTypeIcons['moped']!, kTypeNames['moped']!),
+                      const SizedBox(width: 8),
+                      _filterChip('car', kTypeIcons['car']!, kTypeNames['car']!),
+                    ],
+                  ),
+                ),
+              ]))),
+      // ── My location button ──
+      Positioned(bottom: 180, right: 16,
+          child: FloatingActionButton(
+            heroTag: 'fab_my_loc',
+            mini: true,
+            backgroundColor: Colors.white,
+            onPressed: _centerOnMe,
+            child: const Icon(Icons.my_location, color: kGreen),
+          )),
+      // ── ქვედა: ხელმისაწვდომი + სკან ღილაკი ──
+      Positioned(bottom: 20, left: 20, right: 20, child: Column(children: [
+        Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12),
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 10)]),
+            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Text(_filterType == 'all' ? '🛴' : (kTypeIcons[_filterType] ?? '🛴'),
+                  style: const TextStyle(fontSize: 18)),
+              const SizedBox(width: 8),
+              Text('$availableCount $filterLabel ხელმისაწვდომი',
+                  style: const TextStyle(fontWeight: FontWeight.w600, color: kDark))])),
+        const SizedBox(height: 12),
+        SizedBox(width: double.infinity, height: 58,
+            child: ElevatedButton.icon(icon: const Icon(Icons.qr_code_scanner, color: Colors.white, size: 24),
+                label: const Text('QR სკანირება', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                style: ElevatedButton.styleFrom(backgroundColor: kGreen, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), elevation: 4),
+                onPressed: () => Navigator.push(context, _route(const QRScanScreen())))),
+      ])),
+    ]));
+  }
+
+  Widget _filterChip(String type, String icon, String label) {
+    final selected = _filterType == type;
+    return GestureDetector(
+      onTap: () => _setFilter(type),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? kGreen : Colors.white.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: selected ? kGreen : Colors.white.withOpacity(0.25)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Text(icon, style: const TextStyle(fontSize: 15)),
+          const SizedBox(width: 6),
+          Text(label, style: TextStyle(color: Colors.white, fontWeight: selected ? FontWeight.bold : FontWeight.w500, fontSize: 13)),
+        ]),
+      ),
+    );
+  }
 
   void _showInfo(BuildContext context, Map s) {
     final ok = s['status'] == 'available';
+    final vType = s['vehicle_type']?.toString() ?? 'scooter';
+    final perMin = double.tryParse(s['per_minute_rate']?.toString() ?? '0.15') ?? 0.15;
+    final unlock = double.tryParse(s['unlock_fee']?.toString() ?? '0') ?? 0;
+    final perKm = double.tryParse(s['per_km_rate']?.toString() ?? '0') ?? 0;
+    final battery = int.tryParse(s['battery']?.toString() ?? '0') ?? 0;
     showModalBottomSheet(context: context, backgroundColor: Colors.white,
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
         builder: (_) => Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [
           Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
           const SizedBox(height: 16),
           Row(children: [
-            Container(width: 56, height: 56, decoration: BoxDecoration(color: ok ? kGreen.withOpacity(0.1) : Colors.grey.withOpacity(0.1), shape: BoxShape.circle),
-                child: Icon(Icons.electric_scooter, color: ok ? kGreen : Colors.grey, size: 30)),
+            Container(width: 56, height: 56,
+                decoration: BoxDecoration(color: ok ? kGreen.withOpacity(0.1) : Colors.grey.withOpacity(0.1), shape: BoxShape.circle),
+                child: Center(child: Text(kTypeIcons[vType] ?? '🛴', style: const TextStyle(fontSize: 28)))),
             const SizedBox(width: 16),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(s['device_id']??'—', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kDark)),
-              Text(s['company_name']??'—', style: TextStyle(color: Colors.grey[600]))])),
+              Text('${kTypeNames[vType] ?? vType} · ${s['company_name']??'—'}', style: TextStyle(color: Colors.grey[600], fontSize: 13))])),
             Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(color: ok ? kGreen.withOpacity(0.1) : Colors.red.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
                 child: Text(ok ? 'ხელმისაწვდომი' : 'დაკავებული',
                     style: TextStyle(color: ok ? kGreen : Colors.red, fontWeight: FontWeight.w600, fontSize: 12))),
           ]),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
+          // ── დინამიური ფასები ──
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: kBg, borderRadius: BorderRadius.circular(10)),
+            child: Row(children: [
+              _priceCol('₾${perMin.toStringAsFixed(2)}', 'წუთი'),
+              _priceCol(unlock > 0 ? '₾${unlock.toStringAsFixed(2)}' : 'უფასო', 'გახსნა'),
+              if (perKm > 0) _priceCol('₾${perKm.toStringAsFixed(2)}', 'კმ'),
+              _priceCol('$battery%', 'ბატარეა'),
+            ]),
+          ),
+          const SizedBox(height: 16),
           if (ok) SizedBox(width: double.infinity, height: 52,
               child: ElevatedButton.icon(icon: const Icon(Icons.qr_code_scanner, color: Colors.white),
                   label: const Text('QR სკანირება', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
@@ -580,10 +697,16 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
               decoration: BoxDecoration(color: Colors.red.withOpacity(0.08), borderRadius: BorderRadius.circular(12)),
               child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                 Icon(Icons.block, color: Colors.red, size: 18), SizedBox(width: 8),
-                Text('სქროლი ამჟამად დაკავებულია', style: TextStyle(color: Colors.red))])),
+                Text('მოწყობილობა დაკავებულია', style: TextStyle(color: Colors.red))])),
           const SizedBox(height: 8),
         ])));
   }
+
+  Widget _priceCol(String value, String label) => Expanded(child: Column(children: [
+    Text(value, style: const TextStyle(fontWeight: FontWeight.bold, color: kDark, fontSize: 14)),
+    const SizedBox(height: 2),
+    Text(label, style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+  ]));
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -628,9 +751,9 @@ class _QRScanScreenState extends State<QRScanScreen> {
         IgnorePointer(child: CustomPaint(size: MediaQuery.of(context).size, painter: _OverlayPainter())),
         Positioned(top: MediaQuery.of(context).padding.top+70, left: 0, right: 0,
             child: Column(children: [
-              const Text('სქროლის QR კოდი', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
+              const Text('მოწყობილობის QR კოდი', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
               const SizedBox(height: 6),
-              Text('სქროლთან მიახლოვდი და დაასკანირე', textAlign: TextAlign.center, style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 13))])),
+              Text('მიახლოვდი და დაასკანირე', textAlign: TextAlign.center, style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 13))])),
         Positioned(bottom: 60, left: 0, right: 0,
             child: Center(child: Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
@@ -669,7 +792,7 @@ class _OverlayPainter extends CustomPainter {
 }
 
 // ═══════════════════════════════════════════════════════════
-// SCOOTER DETAIL SCREEN — განახლებული WebView + Tariff Sheet
+// SCOOTER DETAIL SCREEN — Dynamic tariff + company_blocked
 // ═══════════════════════════════════════════════════════════
 class ScooterDetailScreen extends StatefulWidget {
   final String deviceId;
@@ -693,9 +816,22 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
     } catch (_) { setState(()=>_loading=false); }
   }
 
-  // ტარიფის confirmation bottom sheet — ბატარეა + ფასი
+  double get _perMinuteRate => double.tryParse(_scooter?['per_minute_rate']?.toString() ?? '') ?? 0.15;
+  double get _unlockFee => double.tryParse(_scooter?['unlock_fee']?.toString() ?? '') ?? 0;
+  double get _perKmRate => double.tryParse(_scooter?['per_km_rate']?.toString() ?? '') ?? 0;
+  String get _vehicleType => _scooter?['vehicle_type']?.toString() ?? 'scooter';
+
   Future<bool> _showTariffSheet() async {
     final battery = int.tryParse(_scooter?['battery']?.toString() ?? '100') ?? 100;
+    final perMin = _perMinuteRate;
+    final unlock = _unlockFee;
+    final perKm = _perKmRate;
+    final typeName = kTypeNames[_vehicleType] ?? _vehicleType;
+    final typeIcon = kTypeIcons[_vehicleType] ?? '🛴';
+
+    // მაგალითი 5წთ + 2კმ
+    final samplePrice = unlock + (5 * perMin) + (2 * perKm);
+
     final result = await showModalBottomSheet<bool>(
       context: context,
       backgroundColor: Colors.white,
@@ -704,15 +840,18 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
       builder: (_) => Padding(
         padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          // სახელური
           Container(width: 40, height: 4,
               decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
-          const SizedBox(height: 20),
-          const Text('გაქირავების დეტალები',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kDark)),
-          const SizedBox(height: 20),
+          const SizedBox(height: 18),
+          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Text(typeIcon, style: const TextStyle(fontSize: 22)),
+            const SizedBox(width: 8),
+            Text('$typeName — გაქირავება',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kDark)),
+          ]),
+          const SizedBox(height: 18),
 
-          // ბატარეა
+          // ── ბატარეა ──
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -748,42 +887,41 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
           ),
           const SizedBox(height: 12),
 
-          // ტარიფი
+          // ── დინამიური ფასები ──
           Container(
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-                color: kBg, borderRadius: BorderRadius.circular(14)),
+            decoration: BoxDecoration(color: kBg, borderRadius: BorderRadius.circular(14)),
             child: Column(children: [
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                Row(children: [
-                  const Icon(Icons.access_time, color: kGreen, size: 18),
+              _tariffRow(Icons.access_time, 'წუთის ფასი', '₾${perMin.toStringAsFixed(2)} / წთ'),
+              const SizedBox(height: 10), const Divider(height: 1), const SizedBox(height: 10),
+              _tariffRow(Icons.lock_open, 'გახსნის საფასური',
+                  unlock > 0 ? '₾${unlock.toStringAsFixed(2)}' : 'უფასო',
+                  highlightFree: unlock == 0),
+              if (perKm > 0) ...[
+                const SizedBox(height: 10), const Divider(height: 1), const SizedBox(height: 10),
+                _tariffRow(Icons.route, 'კმ-ის ფასი', '₾${perKm.toStringAsFixed(2)} / კმ'),
+              ],
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: kGreen.withOpacity(0.08), borderRadius: BorderRadius.circular(10)),
+                child: Row(children: [
+                  const Icon(Icons.calculate_outlined, color: kGreen, size: 16),
                   const SizedBox(width: 8),
-                  Text('ტარიფი', style: TextStyle(color: Colors.grey[600], fontSize: 14)),
+                  Expanded(child: Text('მაგ. 5წთ${perKm > 0 ? ' + 2კმ' : ''}',
+                      style: const TextStyle(color: kDark, fontSize: 12))),
+                  Text('≈ ₾${samplePrice.toStringAsFixed(2)}',
+                      style: const TextStyle(color: kGreen, fontWeight: FontWeight.bold, fontSize: 14)),
                 ]),
-                const Text('₾0.15 / წუთი',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: kDark)),
-              ]),
-              const SizedBox(height: 10),
-              const Divider(height: 1),
-              const SizedBox(height: 10),
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                Row(children: [
-                  const Icon(Icons.lock_open, color: kGreen, size: 18),
-                  const SizedBox(width: 8),
-                  Text('გახსნის საკომისიო', style: TextStyle(color: Colors.grey[600], fontSize: 14)),
-                ]),
-                const Text('უფასო', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: kGreen)),
-              ]),
+              ),
             ]),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
 
           // BOG info
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(10)),
+            decoration: BoxDecoration(color: Colors.blue.withOpacity(0.05), borderRadius: BorderRadius.circular(10)),
             child: Row(children: [
               const Icon(Icons.info_outline, color: Colors.blue, size: 16),
               const SizedBox(width: 8),
@@ -793,7 +931,6 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
           ),
           const SizedBox(height: 20),
 
-          // გადახდის ღილაკი
           SizedBox(width: double.infinity, height: 54,
               child: ElevatedButton.icon(
                   icon: const Icon(Icons.payment, color: Colors.white),
@@ -812,26 +949,51 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
     return result == true;
   }
 
+  Widget _tariffRow(IconData icon, String label, String value, {bool highlightFree = false}) =>
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        Row(children: [
+          Icon(icon, color: kGreen, size: 18),
+          const SizedBox(width: 8),
+          Text(label, style: TextStyle(color: Colors.grey[600], fontSize: 14)),
+        ]),
+        Text(value, style: TextStyle(
+            fontSize: 14, fontWeight: FontWeight.bold,
+            color: highlightFree ? kGreen : kDark)),
+      ]);
+
   Future<void> _startRide() async {
     final battery = int.tryParse(_scooter?['battery']?.toString() ?? '100') ?? 100;
 
-    // 1. ბატარეის შემოწმება
+    // 1. ბატარეა
     if (battery < 5) {
       if (mounted) showDialog(context: context, builder: (_) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Row(children: [Icon(Icons.battery_alert, color: Colors.red), SizedBox(width: 8), Text('ბატარეა ძალიან დაბალია')]),
-          content: Text('სქროლის ბატარეა მხოლოდ $battery% არის.\n\nგაქირავება შეუძლებელია.'),
+          title: const Row(children: [Icon(Icons.battery_alert, color: Colors.red), SizedBox(width: 8), Text('ბატარეა დაბალია')]),
+          content: Text('მოწყობილობის ბატარეა მხოლოდ $battery% არის.\n\nგაქირავება შეუძლებელია.'),
           actions: [ElevatedButton(onPressed: ()=>Navigator.pop(context),
               style: ElevatedButton.styleFrom(backgroundColor: kDark),
               child: const Text('გასაგებია', style: TextStyle(color: Colors.white)))]));
       return;
     }
 
-    // 2. ტარიფის confirmation sheet
+    // 2. company_blocked შემოწმება (UI-level — სერვერი მაინც გადაამოწმებს)
+    if (_scooter?['company_blocked'] == 1 ||
+        (double.tryParse(_scooter?['company_balance']?.toString() ?? '1') ?? 1) <= 0) {
+      if (mounted) showDialog(context: context, builder: (_) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(children: [Icon(Icons.block, color: Colors.red), SizedBox(width: 8), Flexible(child: Text('მიუწვდომელია'))]),
+          content: const Text('მოწყობილობა დროებით მიუწვდომელია.\nსცადე სხვა, ან მოგვიანებით.'),
+          actions: [ElevatedButton(onPressed: ()=>Navigator.pop(context),
+              style: ElevatedButton.styleFrom(backgroundColor: kDark),
+              child: const Text('გასაგებია', style: TextStyle(color: Colors.white)))]));
+      return;
+    }
+
+    // 3. ტარიფის confirmation
     final confirmed = await _showTariffSheet();
     if (!confirmed) return;
 
-    // 3. ბარათის შემოწმება
+    // 4. ბარათი
     final prefs = await SharedPreferences.getInstance();
     final hasCard = prefs.getBool('has_card') ?? false;
     if (!hasCard) {
@@ -855,10 +1017,23 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
           body: jsonEncode({'device_id': widget.deviceId, 'amount': '1.00', 'user_id': prefs.getInt('user_id')??1}));
       final data = jsonDecode(res.body);
 
+      // ── server-side error handling ──
       if (data['error'] == 'low_battery') {
         setState(()=>_starting=false);
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(backgroundColor: Colors.red[700], content: Text(data['message'] ?? 'ბატარეა ძალიან დაბალია')));
+            SnackBar(backgroundColor: Colors.red[700], content: Text(data['message'] ?? 'ბატარეა დაბალია')));
+        return;
+      }
+
+      if (data['error'] == 'company_blocked') {
+        setState(()=>_starting=false);
+        if (mounted) showDialog(context: context, builder: (_) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Row(children: [Icon(Icons.block, color: Colors.red), SizedBox(width: 8), Flexible(child: Text('მიუწვდომელია'))]),
+            content: Text(data['message'] ?? 'მოწყობილობა დროებით მიუწვდომელია. სცადე სხვა.'),
+            actions: [ElevatedButton(onPressed: ()=>Navigator.pop(context),
+                style: ElevatedButton.styleFrom(backgroundColor: kDark),
+                child: const Text('გასაგებია', style: TextStyle(color: Colors.white)))]));
         return;
       }
 
@@ -868,7 +1043,7 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
         return;
       }
 
-      // 4. BOG redirect URL → WebView-ში ვხსნით (ბრაუზერი არ იხსნება!)
+      // 5. BOG redirect → WebView
       if (data['success']==true && data['redirect_url']!=null) {
         setState(()=>_starting=false);
         if (!mounted) return;
@@ -876,15 +1051,11 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
             BogWebViewScreen(
               url: data['redirect_url'] as String,
               title: 'გადახდა — BOG',
-              onSuccess: () async {
-                // გადახდა წარმატებულია — trip დაიწყება callback-ით ავტომატურად
-              },
+              onSuccess: () async {},
             )
         ));
         if (result == true && mounted) {
-          // გადახდა წარმატებულია, ვიწყებთ polling-ს trip status-ისთვის
           setState(()=>_starting=true);
-          // 5 ცდა, ყოველ 2 წამში — callback-ს ვაცდით (10 წამამდე)
           Map<String, dynamic>? statusData;
           for (int i = 0; i < 5; i++) {
             await Future.delayed(const Duration(seconds: 2));
@@ -903,20 +1074,27 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
             await prefs.setInt('active_trip_id', statusData['trip_id'] as int);
             await prefs.setString('active_device_id', widget.deviceId);
             Navigator.pushAndRemoveUntil(context,
-                _route(ActiveRideScreen(tripId: statusData['trip_id'] as int, deviceId: widget.deviceId)),
+                _route(ActiveRideScreen(
+                  tripId: statusData['trip_id'] as int,
+                  deviceId: widget.deviceId,
+                  perMinuteRate: _perMinuteRate,
+                  unlockFee: _unlockFee,
+                  perKmRate: _perKmRate,
+                  vehicleType: _vehicleType,
+                )),
                     (_)=>false);
             return;
           }
           setState(()=>_starting=false);
           if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('გადახდა გავიდა, მაგრამ მგზავრობა ვერ დაიწყო. სცადე ისტორიის ტაბი.'),
+            content: Text('გადახდა გავიდა, მგზავრობა ვერ დაიწყო. სცადე ისტორიის ტაბი.'),
             backgroundColor: Colors.orange,
           ));
         }
         return;
       }
 
-      // ბარათი შენახულია — პირდაპირ trip-ი იწყება
+      // 6. ბარათი შენახულია — პირდაპირ trip იწყება
       final tr = await http.post(Uri.parse('$BASE_URL/api/trips/start'), headers: h,
           body: jsonEncode({'device_id': widget.deviceId, 'user_id': prefs.getInt('user_id')??1}));
       final td = jsonDecode(tr.body);
@@ -924,7 +1102,14 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
         await prefs.setInt('active_trip_id', td['trip_id'] as int);
         await prefs.setString('active_device_id', widget.deviceId);
         Navigator.pushAndRemoveUntil(context,
-            _route(ActiveRideScreen(tripId: td['trip_id'] as int, deviceId: widget.deviceId)),
+            _route(ActiveRideScreen(
+              tripId: td['trip_id'] as int,
+              deviceId: widget.deviceId,
+              perMinuteRate: _perMinuteRate,
+              unlockFee: _unlockFee,
+              perKmRate: _perKmRate,
+              vehicleType: _vehicleType,
+            )),
                 (_)=>false);
       }
     } catch (e) {
@@ -935,12 +1120,14 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
 
   @override Widget build(BuildContext context) {
     final ok = _scooter?['status']=='available';
+    final typeIcon = kTypeIcons[_vehicleType] ?? '🛴';
+    final typeName = kTypeNames[_vehicleType] ?? _vehicleType;
     return Scaffold(backgroundColor: kBg,
         appBar: AppBar(backgroundColor: kDark,
-            title: Text('სქროლი ${widget.deviceId}', style: const TextStyle(color: Colors.white, fontSize: 16)),
+            title: Text('$typeName ${widget.deviceId}', style: const TextStyle(color: Colors.white, fontSize: 16)),
             leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: ()=>Navigator.pop(context))),
         body: _loading ? const Center(child: CircularProgressIndicator(color: kGreen))
-            : _scooter==null ? const Center(child: Text('სქროლი ვერ მოიძებნა'))
+            : _scooter==null ? const Center(child: Text('მოწყობილობა ვერ მოიძებნა'))
             : SingleChildScrollView(padding: const EdgeInsets.all(20), child: Column(children: [
           Container(padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20),
@@ -948,19 +1135,25 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
               child: Column(children: [
                 Container(width: 90, height: 90,
                     decoration: BoxDecoration(color: ok ? kGreen.withOpacity(0.1) : Colors.grey.withOpacity(0.1), shape: BoxShape.circle),
-                    child: Icon(Icons.electric_scooter, size: 52, color: ok ? kGreen : Colors.grey)),
+                    child: Center(child: Text(typeIcon, style: const TextStyle(fontSize: 48)))),
                 const SizedBox(height: 16),
                 Text(widget.deviceId, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: kDark)),
+                const SizedBox(height: 4),
+                Text(typeName, style: TextStyle(fontSize: 14, color: Colors.grey[600])),
                 const SizedBox(height: 8),
                 Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
                     decoration: BoxDecoration(color: ok ? kGreen.withOpacity(0.1) : Colors.red.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
-                    child: Text(ok ? '✅ ხელმისაწვდომია' : '❌ დაკავებულია',
+                    child: Text(ok ? '✅ ხელმისაწვდომი' : '❌ დაკავებული',
                         style: TextStyle(color: ok ? kGreen : Colors.red, fontWeight: FontWeight.w600))),
                 const SizedBox(height: 20),
                 _iRow(Icons.business,              'კომპანია', _scooter!['company_name']??'—'),
                 _iRow(Icons.battery_charging_full, 'ბატარეა',  '${_scooter!['battery']??0}%'),
                 _iRow(Icons.location_on,           'ზონა',     _scooter!['zone_name']??'—'),
-                _iRow(Icons.attach_money,          'ტარიფი',   '₾0.15 / წუთი'),
+                _iRow(Icons.access_time,           'წუთის ფასი', '₾${_perMinuteRate.toStringAsFixed(2)} / წთ'),
+                if (_unlockFee > 0)
+                  _iRow(Icons.lock_open, 'გახსნა', '₾${_unlockFee.toStringAsFixed(2)}'),
+                if (_perKmRate > 0)
+                  _iRow(Icons.route, 'კმ', '₾${_perKmRate.toStringAsFixed(2)} / კმ'),
               ])),
           const SizedBox(height: 20),
           if (ok) SizedBox(width: double.infinity, height: 56,
@@ -977,7 +1170,7 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
               decoration: BoxDecoration(color: Colors.red.withOpacity(0.08), borderRadius: BorderRadius.circular(14)),
               child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                 Icon(Icons.block, color: Colors.red), SizedBox(width: 8),
-                Text('სქროლი ხელმისაწვდომი არ არის', style: TextStyle(color: Colors.red))])),
+                Text('მოწყობილობა ხელმისაწვდომი არ არის', style: TextStyle(color: Colors.red))])),
         ])));
   }
 
@@ -989,11 +1182,24 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
 }
 
 // ═══════════════════════════════════════════════════════════
-// ACTIVE RIDE SCREEN — Google Maps + GPS + სტატისტიკა
+// ACTIVE RIDE SCREEN — Camera follow + Dynamic pricing
 // ═══════════════════════════════════════════════════════════
 class ActiveRideScreen extends StatefulWidget {
-  final int tripId; final String deviceId;
-  const ActiveRideScreen({super.key, required this.tripId, required this.deviceId});
+  final int tripId;
+  final String deviceId;
+  final double perMinuteRate;
+  final double unlockFee;
+  final double perKmRate;
+  final String vehicleType;
+  const ActiveRideScreen({
+    super.key,
+    required this.tripId,
+    required this.deviceId,
+    this.perMinuteRate = 0.15,
+    this.unlockFee = 0,
+    this.perKmRate = 0,
+    this.vehicleType = 'scooter',
+  });
   @override State<ActiveRideScreen> createState() => _ActiveRideScreenState();
 }
 class _ActiveRideScreenState extends State<ActiveRideScreen> {
@@ -1009,12 +1215,24 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   List _geofences = [];
   final Set<Polygon> _polygons = {};
   bool _inZone = true;
+  bool _cameraReady = false;
+
+  // ფასები — constructor-დან მოდის, ან Sync-ი ხდება server-დან
+  double _perMinuteRate = 0.15;
+  double _unlockFee = 0;
+  double _perKmRate = 0;
+  String _vehicleType = 'scooter';
 
   @override
   void initState() {
     super.initState();
+    _perMinuteRate = widget.perMinuteRate;
+    _unlockFee = widget.unlockFee;
+    _perKmRate = widget.perKmRate;
+    _vehicleType = widget.vehicleType;
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => setState(() => _seconds++));
     _locationTimer = Timer.periodic(const Duration(seconds: 5), (_) => _updateLocation());
+    _syncPricing();    // server-დან აქტუალური ფასები (splash-დან resume-ის შემთხვევაში)
     _loadGeofences();
     _updateLocation();
   }
@@ -1024,6 +1242,26 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     _timer?.cancel();
     _locationTimer?.cancel();
     super.dispose();
+  }
+
+  // splash-დან resume-ისას constructor-ში default-ები მოდის — server-დან ვიღებთ რეალურს
+  Future<void> _syncPricing() async {
+    try {
+      final h = await _authHeaders();
+      final res = await http.get(Uri.parse('$BASE_URL/api/scooters'), headers: h);
+      final d = jsonDecode(res.body);
+      if (d is List) {
+        final s = d.firstWhere((s) => s['device_id'] == widget.deviceId, orElse: () => null);
+        if (s != null && mounted) {
+          setState(() {
+            _perMinuteRate = double.tryParse(s['per_minute_rate']?.toString() ?? '') ?? _perMinuteRate;
+            _unlockFee = double.tryParse(s['unlock_fee']?.toString() ?? '') ?? _unlockFee;
+            _perKmRate = double.tryParse(s['per_km_rate']?.toString() ?? '') ?? _perKmRate;
+            _vehicleType = s['vehicle_type']?.toString() ?? _vehicleType;
+          });
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadGeofences() async {
@@ -1056,6 +1294,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     if (mounted) setState(() => _polygons
       ..clear()
       ..addAll(polygons));
+    _recheckZone();
   }
 
   List<LatLng> _parseGeofence(dynamic g) {
@@ -1071,11 +1310,34 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     } catch (_) { return []; }
   }
 
+  bool _pointInPolygon(LatLng p, List<LatLng> polygon) {
+    final x = p.latitude, y = p.longitude;
+    var inside = false;
+    for (var i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      final xi = polygon[i].latitude, yi = polygon[i].longitude;
+      final xj = polygon[j].latitude, yj = polygon[j].longitude;
+      if (((yi > y) != (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+
+  void _recheckZone() {
+    if (_geofences.isEmpty) { setState(() => _inZone = true); return; }
+    var inAny = false;
+    for (final g in _geofences) {
+      final pts = _parseGeofence(g);
+      if (pts.isNotEmpty && _pointInPolygon(_currentPos, pts)) { inAny = true; break; }
+    }
+    if (mounted) setState(() => _inZone = inAny);
+  }
+
   Future<void> _updateLocation() async {
     try {
       var perm = await Geolocator.checkPermission();
       if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
-      if (perm == LocationPermission.denied) return;
+      if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) return;
       final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
       final newPos = LatLng(pos.latitude, pos.longitude);
       if (_prevPos != null) {
@@ -1090,7 +1352,14 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
         _prevPos = _currentPos;
         _currentPos = newPos;
       });
-      _mapCtrl?.animateCamera(CameraUpdate.newLatLng(newPos));
+      // Camera follow user
+      if (!_cameraReady) {
+        _cameraReady = true;
+        _mapCtrl?.animateCamera(CameraUpdate.newLatLngZoom(newPos, 17));
+      } else {
+        _mapCtrl?.animateCamera(CameraUpdate.newLatLng(newPos));
+      }
+      _recheckZone();
     } catch (_) {}
   }
 
@@ -1098,7 +1367,12 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     final m = _seconds ~/ 60, s = _seconds % 60;
     return '${m.toString().padLeft(2,'0')}:${s.toString().padLeft(2,'0')}';
   }
-  double get _cost => (_seconds / 60) * 0.15;
+
+  // დინამიური cost: unlock + (წუთები × per_min) + (კმ × per_km)
+  double get _cost {
+    final minutes = _seconds / 60;
+    return _unlockFee + (minutes * _perMinuteRate) + (_distanceKm * _perKmRate);
+  }
 
   Future<void> _endRide() async {
     final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
@@ -1143,7 +1417,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
         if (mounted) showDialog(context: context, barrierDismissible: false, builder: (_) => AlertDialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             title: const Row(children: [Icon(Icons.check_circle, color: kGreen), SizedBox(width: 8), Text('მგზავრობა დასრულდა')]),
-            content: Text('დრო: ${data['minutes']} წუთი\nგადახდილი: ₾${data['amount']}'),
+            content: Text('დრო: ${data['minutes']} წუთი\nმანძილი: ${_distanceKm.toStringAsFixed(2)} კმ\nგადახდილი: ₾${data['amount']}'),
             actions: [ElevatedButton(
                 onPressed: () => Navigator.pushAndRemoveUntil(context, _route(const MainScreen()), (_) => false),
                 style: ElevatedButton.styleFrom(backgroundColor: kGreen),
@@ -1157,6 +1431,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final typeIcon = kTypeIcons[_vehicleType] ?? '🛴';
     return Scaffold(
       body: Column(children: [
         // ══ Google Maps ══
@@ -1164,7 +1439,13 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
           child: Stack(children: [
             GoogleMap(
               initialCameraPosition: CameraPosition(target: _currentPos, zoom: 16),
-              onMapCreated: (c) => _mapCtrl = c,
+              onMapCreated: (c) {
+                _mapCtrl = c;
+                if (_currentPos.latitude != 41.6938) {
+                  _cameraReady = true;
+                  _mapCtrl?.animateCamera(CameraUpdate.newLatLngZoom(_currentPos, 17));
+                }
+              },
               myLocationEnabled: true,
               myLocationButtonEnabled: false,
               zoomControlsEnabled: false,
@@ -1178,23 +1459,25 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                 ),
               },
             ),
-            // ზედა badge — მიმდინარეობს
+            // device + type
             Positioned(
               top: MediaQuery.of(context).padding.top + 12,
               left: 16,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
                     color: kDark.withOpacity(0.85),
                     borderRadius: BorderRadius.circular(20)),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   Container(width: 8, height: 8, decoration: const BoxDecoration(color: kGreen, shape: BoxShape.circle)),
                   const SizedBox(width: 8),
+                  Text(typeIcon, style: const TextStyle(fontSize: 14)),
+                  const SizedBox(width: 6),
                   Text(widget.deviceId, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
                 ]),
               ),
             ),
-            // ზონის სტატუსი
+            // zone status
             Positioned(
               top: MediaQuery.of(context).padding.top + 12,
               right: 16,
@@ -1211,6 +1494,18 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                 ]),
               ),
             ),
+            // re-center button
+            Positioned(
+              bottom: 16,
+              right: 16,
+              child: FloatingActionButton(
+                heroTag: 'fab_recenter',
+                mini: true,
+                backgroundColor: Colors.white,
+                onPressed: () => _mapCtrl?.animateCamera(CameraUpdate.newLatLngZoom(_currentPos, 17)),
+                child: const Icon(Icons.my_location, color: kGreen),
+              ),
+            ),
           ]),
         ),
 
@@ -1219,16 +1514,14 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
           color: kDark,
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
           child: Column(children: [
-            // 3 სტატისტიკა
             Row(children: [
               _statCard('დრო', _timeStr, 'წთ:წმ', Icons.access_time),
               const SizedBox(width: 8),
               _statCard('მანძილი', _distanceKm.toStringAsFixed(2), 'კმ', Icons.route),
               const SizedBox(width: 8),
-              _statCard('ღირებულება', '₾${_cost.toStringAsFixed(2)}', '0.15/წთ', Icons.attach_money, green: true),
+              _statCard('ღირებულება', '₾${_cost.toStringAsFixed(2)}', '${_perMinuteRate.toStringAsFixed(2)}/წთ', Icons.attach_money, green: true),
             ]),
             const SizedBox(height: 12),
-            // დასრულების ღილაკი
             SafeArea(
               top: false,
               child: SizedBox(
@@ -1273,7 +1566,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
 }
 
 // ═══════════════════════════════════════════════════════════
-// TRIPS SCREEN — active trip-ზე tap → ActiveRideScreen
+// TRIPS SCREEN
 // ═══════════════════════════════════════════════════════════
 class TripsScreen extends StatefulWidget {
   const TripsScreen({super.key});
@@ -1297,24 +1590,34 @@ class _TripsScreenState extends State<TripsScreen> {
     final deviceId = t['device_id']?.toString() ?? '';
     await prefs.setInt('active_trip_id', tripId);
     await prefs.setString('active_device_id', deviceId);
+    // pricing trip-ის snapshot-დან (server-ი ინახავს trip-ში)
+    final perMin = double.tryParse(t['per_minute_rate']?.toString() ?? '') ?? 0.15;
+    final unlock = double.tryParse(t['unlock_fee']?.toString() ?? '') ?? 0;
+    final perKm = double.tryParse(t['per_km_rate']?.toString() ?? '') ?? 0;
+    final vType = t['vehicle_type']?.toString() ?? 'scooter';
     if (mounted) Navigator.pushAndRemoveUntil(context,
-        _route(ActiveRideScreen(tripId: tripId, deviceId: deviceId)),
+        _route(ActiveRideScreen(
+          tripId: tripId, deviceId: deviceId,
+          perMinuteRate: perMin, unlockFee: unlock, perKmRate: perKm, vehicleType: vType,
+        )),
             (_)=>false);
   }
 
   @override Widget build(BuildContext context) => Scaffold(backgroundColor: kBg,
       appBar: AppBar(backgroundColor: kDark, automaticallyImplyLeading: false,
-          title: const Text('ჩემი მოგზაურობები',style:TextStyle(color:Colors.white)),
+          title: const Text('ჩემი მგზავრობები',style:TextStyle(color:Colors.white)),
           actions: [IconButton(icon:const Icon(Icons.refresh,color:Colors.white),onPressed:_load)]),
       body: _loading?const Center(child:CircularProgressIndicator(color:kGreen))
           :_trips.isEmpty?Center(child:Column(mainAxisAlignment:MainAxisAlignment.center,children:[
         Icon(Icons.history,size:80,color:Colors.grey[300]),const SizedBox(height:16),
-        Text('მოგზაურობები ჯერ არ გაქვს',style:TextStyle(color:Colors.grey[500],fontSize:16)),
+        Text('მგზავრობები ჯერ არ გაქვს',style:TextStyle(color:Colors.grey[500],fontSize:16)),
         const SizedBox(height:8),Text('QR სკანირებით დაიწყე!',style:TextStyle(color:Colors.grey[400],fontSize:13))]))
           :ListView.builder(padding:const EdgeInsets.all(16),itemCount:_trips.length,itemBuilder:(_,i){
         final t=_trips[i];
         final done=t['status']=='completed';
         final active = t['status']=='active';
+        final vType = t['vehicle_type']?.toString() ?? 'scooter';
+        final typeIcon = kTypeIcons[vType] ?? '🛴';
         return Container(margin:const EdgeInsets.only(bottom:12),
             decoration:BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(14),
                 boxShadow:[BoxShadow(color:Colors.black.withOpacity(0.04),blurRadius:8)]),
@@ -1328,7 +1631,7 @@ class _TripsScreenState extends State<TripsScreen> {
                   padding: const EdgeInsets.all(16),
                   child: Row(children:[
                     Container(width:48,height:48,decoration:BoxDecoration(color:kGreen.withOpacity(0.1),shape:BoxShape.circle),
-                        child:const Icon(Icons.electric_scooter,color:kGreen)),
+                        child:Center(child: Text(typeIcon, style: const TextStyle(fontSize: 24)))),
                     const SizedBox(width:14),
                     Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
                       Text(t['device_id']??'—',style:const TextStyle(fontWeight:FontWeight.bold,color:kDark)),
@@ -1529,7 +1832,7 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
 }
 
 // ═══════════════════════════════════════════════════════════
-// CARD SCREEN — განახლებული WebView-ით
+// CARD SCREEN
 // ═══════════════════════════════════════════════════════════
 class CardScreen extends StatefulWidget {
   const CardScreen({super.key});
@@ -1560,7 +1863,6 @@ class _CardScreenState extends State<CardScreen> {
       if (d['redirect_url']!=null) {
         setState(()=>_loading=false);
         if (!mounted) return;
-        // WebView-ში ვხსნით — ბრაუზერი არ იხსნება!
         final result = await Navigator.push<bool>(context, MaterialPageRoute<bool>(builder: (_) =>
             BogWebViewScreen(
               url: d['redirect_url'] as String,
@@ -1660,12 +1962,12 @@ class _CardScreenState extends State<CardScreen> {
 class FaqScreen extends StatelessWidget {
   const FaqScreen({super.key});
   static final _faqs = [
-    ('როგორ დავიწყო გაქირავება?',    'გახსენი აპი, დააჭირე სქროლის სკანირება და დაასკანირე სქროლზე არსებული QR კოდი.'),
-    ('რა ღირს გაქირავება?',          '₾0.15 წუთში. პირველი წუთი უფასოა.'),
-    ('სად შემიძლია სქროლის დატოვება?','სქროლი დატოვე მწვანე ზონაში — რუკაზე ნაჩვენები სერვის არეალი.'),
-    ('ბატარეა გამოილია — რა ვქნა?',  'სქროლი მაინც შეაჩერე აპიდან. დაგვიკავშირდი Live Chat-ის გზით.'),
+    ('როგორ დავიწყო გაქირავება?',    'გახსენი აპი, დააჭირე QR სკანირება და დაასკანირე მოწყობილობაზე არსებული QR კოდი.'),
+    ('რა ღირს გაქირავება?',          'დამოკიდებულია მოწყობილობის ტიპზე — სქროლი ₾0.15/წთ, ველო ₾0.10/წთ, მანქანა ₾0.50/წთ + კმ-ის ფასი.'),
+    ('სად შემიძლია მოწყობილობის დატოვება?','დატოვე მწვანე ზონაში — რუკაზე ნაჩვენები სერვის არეალი.'),
+    ('ბატარეა გამოილია — რა ვქნა?',  'მაინც შეაჩერე აპიდან. დაგვიკავშირდი Live Chat-ის გზით.'),
     ('გადახდა ვერ მოხდა — რა ვქნა?', 'შეამოწმე ბარათი Wallet & Payments-ში. BOG ბარათი უნდა იყოს მიბმული.'),
-    ('მოგზაურობა ვერ ვხედავ?',        'ისტორია ტაბზე ნახავ ყველა მოგზაურობას. პრობლემის შემთხვევაში Live Chat-ზე გვწერე.'),
+    ('მგზავრობა ვერ ვხედავ?',         'ისტორია ტაბზე ნახავ ყველა მგზავრობას. პრობლემის შემთხვევაში Live Chat-ზე გვწერე.'),
   ];
   @override Widget build(BuildContext context) => Scaffold(backgroundColor: kBg,
       appBar: AppBar(backgroundColor:kDark, title:const Text('FAQ',style:TextStyle(color:Colors.white)),
@@ -1691,7 +1993,7 @@ class SafetyScreen extends StatelessWidget {
     (Icons.security,      'ჩაფხუტი',       'გამოიყენე ჩაფხუტი სიარულის დროს.'),
     (Icons.speed,         'სიჩქარე',        'ქალაქში მაქსიმუმ 25 კმ/სთ.'),
     (Icons.no_drinks,     'ალკოჰოლი',       'ალკოჰოლის ზემოქმედებით სიარული მკაცრად აკრძალულია.'),
-    (Icons.people,        'ერთი მგზავრი',   'სქროლზე ერთი ადამიანი იჯდება.'),
+    (Icons.people,        'ერთი მგზავრი',   'მოწყობილობაზე ერთი ადამიანი იჯდება.'),
     (Icons.phone_android, 'ტელეფონი',       'სიარულის დროს ტელეფონის გამოყენება საშიშია.'),
     (Icons.park,          'ქვეითთა ბილიკი', 'ქვეითთა ბილიკებზე სიარული აკრძალულია.'),
   ];
@@ -1722,11 +2024,11 @@ class HowToRideScreen extends StatelessWidget {
   const HowToRideScreen({super.key});
   static final _steps = [
     (Icons.download_done,        'აპის გახსნა',   'გახსენი Velocar და შედი შენი ანგარიშით.'),
-    (Icons.qr_code_scanner,      'QR სკანირება',  'სქროლთან მიახლოვდი და დაასკანირე QR კოდი.'),
-    (Icons.payment,              'გადახდა',       'BOG ბარათით გაიარე გადახდა. სქროლი იხსნება.'),
-    (Icons.electric_scooter,     'სიარული',       'გამოიყენე სქროლი. ყურადღება მიმოქცევაზე!'),
+    (Icons.qr_code_scanner,      'QR სკანირება',  'მოწყობილობასთან მიახლოვდი და დაასკანირე QR კოდი.'),
+    (Icons.payment,              'გადახდა',       'BOG ბარათით გაიარე გადახდა. მოწყობილობა იხსნება.'),
+    (Icons.electric_scooter,     'სიარული',       'გამოიყენე მოწყობილობა. ყურადღება მიმოქცევაზე!'),
     (Icons.location_on,          'სერვის ზონა',   'დარჩი მწვანე ზონაში — გარეთ გასვლა დაუშვებელია.'),
-    (Icons.stop_circle_outlined, 'დასრულება',     'ჩააპარკე სქროლი სწორ ადგილას და დაასრულე გაქირავება.'),
+    (Icons.stop_circle_outlined, 'დასრულება',     'ჩააპარკე სწორ ადგილას და დაასრულე გაქირავება.'),
   ];
   @override Widget build(BuildContext context) => Scaffold(backgroundColor:kBg,
       appBar:AppBar(backgroundColor:kDark,title:const Text('How to Ride',style:TextStyle(color:Colors.white)),
