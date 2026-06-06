@@ -458,18 +458,36 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
 
   Future<void> _getLocation() async {
     try {
-      if (!await Geolocator.isLocationServiceEnabled()) return;
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        _fallbackLocation();
+        return;
+      }
       var p = await Geolocator.checkPermission();
       if (p == LocationPermission.denied) p = await Geolocator.requestPermission();
-      if (p == LocationPermission.denied || p == LocationPermission.deniedForever) return;
-      final pos = await Geolocator.getCurrentPosition();
+      if (p == LocationPermission.denied || p == LocationPermission.deniedForever) {
+        _fallbackLocation();
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition()
+          .timeout(const Duration(seconds: 8), onTimeout: () {
+        throw TimeoutException('GPS timeout');
+      });
       if (!mounted) return;
       setState(() {
         _center = LatLng(pos.latitude, pos.longitude);
         _gpsLoaded = true;
       });
       _applyInitialCamera();
-    } catch (_) {}
+    } catch (_) {
+      _fallbackLocation();
+    }
+  }
+
+  // თუ GPS-ი ვერ მიიღო — overlay გადადის, fallback ცენტრით
+  void _fallbackLocation() {
+    if (!mounted) return;
+    setState(() => _gpsLoaded = true);  // overlay-ის გადაცემა — fallback _center-ით
+    _applyInitialCamera();
   }
 
   // GPS-ი და map controller-ი ერთმანეთს ელოდებიან — ვინც ბოლოს მოვა, ის გადააფარებს კამერას
@@ -529,14 +547,30 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
 
   List<LatLng> _parseGeofence(dynamic g) {
     try {
+      // Server აბრუნებს polygon_coords (უკვე parsed array of [lat, lng])
+      final pc = g['polygon_coords'];
+      if (pc is List && pc.isNotEmpty) {
+        return pc
+            .where((p) => p is List && p.length >= 2)
+            .map<LatLng>((p) => LatLng(
+                double.parse(p[0].toString()),
+                double.parse(p[1].toString())))
+            .toList();
+      }
+      // legacy ფორმატი — coordinates string-ად
       if (g['coordinates'] != null) {
         final c = jsonDecode(g['coordinates'].toString());
-        if (c is List) return c.map<LatLng>((p) => LatLng(double.parse(p[1].toString()), double.parse(p[0].toString()))).toList();
+        if (c is List) {
+          return c
+              .where((p) => p is List && p.length >= 2)
+              .map<LatLng>((p) => LatLng(
+                  double.parse(p[1].toString()),
+                  double.parse(p[0].toString())))
+              .toList();
+        }
       }
-      final lat = double.tryParse(g['latitude']?.toString() ?? '') ?? 41.6938;
-      final lng = double.tryParse(g['longitude']?.toString() ?? '') ?? 44.8015;
-      const r = 0.01;
-      return [LatLng(lat+r,lng-r),LatLng(lat+r,lng+r),LatLng(lat-r,lng+r),LatLng(lat-r,lng-r)];
+      // არ ვხატავთ ცრუ ოთხკუთხედს — თუ პოლიგონი არ მოვიდა, ცარიელი დააბრუნე
+      return [];
     } catch (_) { return []; }
   }
 
@@ -566,6 +600,21 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
         myLocationEnabled: true, myLocationButtonEnabled: false, zoomControlsEnabled: false,
         markers: _markers, polygons: _polygons,
       ),
+      // ── Loading overlay — GPS resolution-მდე Tbilisi flash-ი არ ჩანდეს ──
+      if (!_gpsApplied)
+        Container(
+          color: kDark.withOpacity(0.85),
+          child: Center(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              _logo(80, 44),
+              const SizedBox(height: 20),
+              const CircularProgressIndicator(color: kGreen, strokeWidth: 2),
+              const SizedBox(height: 16),
+              Text('მდებარეობის მოძებნა...',
+                  style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 13)),
+            ]),
+          ),
+        ),
       // ── ზედა bar ──
       Positioned(top: 0, left: 0, right: 0,
           child: Container(
@@ -1310,14 +1359,30 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
 
   List<LatLng> _parseGeofence(dynamic g) {
     try {
+      // Server აბრუნებს polygon_coords (უკვე parsed array of [lat, lng])
+      final pc = g['polygon_coords'];
+      if (pc is List && pc.isNotEmpty) {
+        return pc
+            .where((p) => p is List && p.length >= 2)
+            .map<LatLng>((p) => LatLng(
+                double.parse(p[0].toString()),
+                double.parse(p[1].toString())))
+            .toList();
+      }
+      // legacy ფორმატი — coordinates string-ად
       if (g['coordinates'] != null) {
         final c = jsonDecode(g['coordinates'].toString());
-        if (c is List) return c.map<LatLng>((p) => LatLng(double.parse(p[1].toString()), double.parse(p[0].toString()))).toList();
+        if (c is List) {
+          return c
+              .where((p) => p is List && p.length >= 2)
+              .map<LatLng>((p) => LatLng(
+                  double.parse(p[1].toString()),
+                  double.parse(p[0].toString())))
+              .toList();
+        }
       }
-      final lat = double.tryParse(g['latitude']?.toString() ?? '') ?? 41.6938;
-      final lng = double.tryParse(g['longitude']?.toString() ?? '') ?? 44.8015;
-      const r = 0.01;
-      return [LatLng(lat+r,lng-r),LatLng(lat+r,lng+r),LatLng(lat-r,lng+r),LatLng(lat-r,lng-r)];
+      // არ ვხატავთ ცრუ ოთხკუთხედს — თუ პოლიგონი არ მოვიდა, ცარიელი დააბრუნე
+      return [];
     } catch (_) { return []; }
   }
 
