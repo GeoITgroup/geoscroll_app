@@ -1057,7 +1057,8 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
         if (result == true && mounted) {
           setState(()=>_starting=true);
           Map<String, dynamic>? statusData;
-          for (int i = 0; i < 5; i++) {
+          // 15 ცდა × 2 წამი = 30 წამამდე — BOG callback ხანდახან გვიან მოდის
+          for (int i = 0; i < 15; i++) {
             await Future.delayed(const Duration(seconds: 2));
             try {
               final h2 = await _authHeaders();
