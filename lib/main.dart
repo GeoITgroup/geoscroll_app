@@ -14,7 +14,7 @@ import 'dart:convert';
 import 'dart:async';
 
 const String BASE_URL    = 'https://velocar.ge';
-const String APP_VERSION = '1.0.1';
+const String APP_VERSION = '1.0.2';
 
 const kGreen      = Color(0xFF2E9E6B);
 const kGreenLight = Color(0xFF4CAF80);
@@ -446,6 +446,7 @@ class MapHomeScreen extends StatefulWidget {
 }
 class _MapHomeScreenState extends State<MapHomeScreen> {
   List _scooters = [], _geofences = [];
+  double _walletBalance = 0;
   LatLng _center = const LatLng(41.6938, 44.8015); // ფოლბექი — თბილისი
   GoogleMapController? _mapCtrl;
   final Set<Marker> _markers = {};
@@ -454,7 +455,18 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
   bool _gpsLoaded = false;
   bool _gpsApplied = false;
 
-  @override void initState() { super.initState(); _getLocation(); _loadData(); }
+  @override void initState() { super.initState(); _getLocation(); _loadData(); _loadBalance(); }
+
+  Future<void> _loadBalance() async {
+    try {
+      final h = await _authHeaders();
+      final r = await http.get(Uri.parse('$BASE_URL/api/wallet/balance'), headers: h);
+      final d = jsonDecode(r.body);
+      if (d['success'] == true && mounted) {
+        setState(() => _walletBalance = (d['balance'] as num?)?.toDouble() ?? 0);
+      }
+    } catch (_) {}
+  }
 
   Future<void> _getLocation() async {
     try {
@@ -526,20 +538,9 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
         onTap: () => _showInfo(context, s),
       ));
     }
-    // მხოლოდ ის geofence-ები გამოვაჩინოთ რომელთა ID-ც ფიგურირებს scooter-ების geofence_id-ში.
-    // უმინიჭებო ზონები (რომელზე არცერთი vehicle არ მდებარეობს) რუკაზე არ ჩანდეს.
-    final assignedGeoIds = <int>{};
-    for (final s in _scooters) {
-      final gid = s['geofence_id'];
-      if (gid == null) continue;
-      final id = int.tryParse(gid.toString());
-      if (id != null) assignedGeoIds.add(id);
-    }
     final polygons = <Polygon>{};
     int gi = 0;
     for (final g in _geofences) {
-      final gid = int.tryParse((g['id'] ?? '').toString());
-      if (gid == null || !assignedGeoIds.contains(gid)) continue;
       final pts = _parseGeofence(g);
       if (pts.isEmpty) continue;
       polygons.add(Polygon(
@@ -634,8 +635,32 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
               child: Column(children: [
                 Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                   const Text('VELOCAR', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2)),
-                  Container(decoration: BoxDecoration(color: Colors.white.withOpacity(0.15), borderRadius: BorderRadius.circular(10)),
-                      child: IconButton(icon: const Icon(Icons.refresh, color: Colors.white, size: 20), onPressed: _loadData)),
+                  Row(children: [
+                    GestureDetector(
+                      onTap: () async {
+                        await Navigator.push(context, _route(const WalletScreen()));
+                        _loadBalance();
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: kGreen.withOpacity(0.18),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: kGreen.withOpacity(0.4)),
+                        ),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          const Icon(Icons.account_balance_wallet, color: kGreen, size: 16),
+                          const SizedBox(width: 6),
+                          Text('₾${_walletBalance.toStringAsFixed(2)}',
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                        ]),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(decoration: BoxDecoration(color: Colors.white.withOpacity(0.15), borderRadius: BorderRadius.circular(10)),
+                        child: IconButton(icon: const Icon(Icons.refresh, color: Colors.white, size: 20),
+                            onPressed: () { _loadData(); _loadBalance(); })),
+                  ]),
                 ]),
                 const SizedBox(height: 10),
                 // ── Vehicle type filter chips ──
@@ -1053,41 +1078,37 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
     final confirmed = await _showTariffSheet();
     if (!confirmed) return;
 
-    // 4. ბარათი — server-დან აქტუალური სტატუსი (prefs შეიძლება მოძველდეს)
-    final prefs = await SharedPreferences.getInstance();
-    bool hasCard = false;
-    try {
-      final hh = await _authHeaders();
-      final cardRes = await http.get(Uri.parse('$BASE_URL/api/user/card-status'), headers: hh);
-      final cardData = jsonDecode(cardRes.body);
-      hasCard = cardData['has_card'] == true;
-      await prefs.setBool('has_card', hasCard);  // prefs-ის სინქრონიზაცია
-    } catch (_) {
-      // network შეცდომა → fall back to cached prefs
-      hasCard = prefs.getBool('has_card') ?? false;
-    }
-    if (!hasCard) {
-      if (mounted) showDialog(context: context, builder: (_) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Row(children: [Icon(Icons.credit_card_off, color: kOrange), SizedBox(width: 8), Flexible(child: Text('ბარათი არ არის'))]),
-          content: const Text('გაქირავებამდე BOG ბარათი უნდა მიაბა.\n\nWallet & Payments-ში დაამატე ბარათი.'),
-          actions: [
-            TextButton(onPressed: ()=>Navigator.pop(context), child: const Text('გაუქმება')),
-            ElevatedButton(
-                onPressed: () { Navigator.pop(context); Navigator.push(context, _route(const CardScreen())); },
-                style: ElevatedButton.styleFrom(backgroundColor: kGreen),
-                child: const Text('ბარათის დამატება', style: TextStyle(color: Colors.white)))]));
-      return;
-    }
-
+    // 4. Wallet flow — trip start პირდაპირ
     setState(()=>_starting=true);
     try {
       final h = await _authHeaders();
-      final res = await http.post(Uri.parse('$BASE_URL/api/bog/pay'), headers: h,
-          body: jsonEncode({'device_id': widget.deviceId, 'amount': '1.00', 'user_id': prefs.getInt('user_id')??1}));
+      final res = await http.post(
+        Uri.parse('$BASE_URL/api/trips/start'),
+        headers: h,
+        body: jsonEncode({'device_id': widget.deviceId}),
+      );
       final data = jsonDecode(res.body);
 
-      // ── server-side error handling ──
+      // ── insufficient_balance ──
+      if (data['error'] == 'insufficient_balance') {
+        setState(()=>_starting=false);
+        final balance  = (data['balance']  as num?)?.toDouble() ?? 0;
+        final required = (data['required'] as num?)?.toDouble() ?? 0;
+        if (mounted) showDialog(context: context, builder: (_) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Row(children: [Icon(Icons.account_balance_wallet_outlined, color: kOrange), SizedBox(width: 8), Flexible(child: Text('ბალანსი ცოტაა'))]),
+            content: Text('მიმდინარე ბალანსი: ₾${balance.toStringAsFixed(2)}\nსაჭიროა მინიმუმ: ₾${required.toStringAsFixed(2)}\n\nშეავსე საფულე.'),
+            actions: [
+              TextButton(onPressed: ()=>Navigator.pop(context), child: const Text('გაუქმება')),
+              ElevatedButton(
+                onPressed: () { Navigator.pop(context); Navigator.push(context, _route(const WalletScreen())); },
+                style: ElevatedButton.styleFrom(backgroundColor: kGreen),
+                child: const Text('საფულის შევსება', style: TextStyle(color: Colors.white)),
+              ),
+            ]));
+        return;
+      }
+
       if (data['error'] == 'low_battery') {
         setState(()=>_starting=false);
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(
@@ -1107,89 +1128,33 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
         return;
       }
 
-      if (data['error'] == 'no_card') {
-        setState(()=>_starting=false);
-        if (mounted) Navigator.push(context, _route(const CardScreen()));
+      // ── trip წარმატებით დაიწყო ──
+      if (data['success'] == true && data['trip_id'] != null && mounted) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setInt('active_trip_id', data['trip_id'] as int);
+        await prefs.setString('active_device_id', widget.deviceId);
+        Navigator.pushAndRemoveUntil(context,
+            _route(ActiveRideScreen(
+              tripId: data['trip_id'] as int,
+              deviceId: widget.deviceId,
+              perMinuteRate: (data['per_minute_rate'] as num?)?.toDouble() ?? _perMinuteRate,
+              unlockFee:     (data['unlock_fee']      as num?)?.toDouble() ?? _unlockFee,
+              perKmRate:     (data['per_km_rate']     as num?)?.toDouble() ?? _perKmRate,
+              vehicleType:   (data['vehicle_type']    as String?) ?? _vehicleType,
+            )),
+            (_)=>false);
         return;
       }
 
-      // 5. BOG redirect → WebView (3DS საჭიროა)
-      if (data['success']==true && data['redirect_url']!=null) {
-        setState(()=>_starting=false);
-        if (!mounted) return;
-        final result = await Navigator.push<bool>(context, MaterialPageRoute<bool>(builder: (_) =>
-            BogWebViewScreen(
-              url: data['redirect_url'] as String,
-              title: 'გადახდა — BOG',
-              onSuccess: () async {},
-            )
-        ));
-        if (result == true && mounted) {
-          setState(()=>_starting=true);
-          await _pollAndNavigateToRide(prefs);
-        }
-        return;
-      }
-
-      // 6. 3DS-ის გარეშე — saved card-ით პირდაპირ ჩამოეჭრა (auto_started: true)
-      //    /api/bog/pay-მ უკვე შექმნა trip — polling-ით ველოდებით active სტატუსს.
-      //    NB: /api/trips/start აღარ გვიწოდია — ის dev-only endpoint-ია და duplicate trip-ს ქმნიდა.
-      if (data['success']==true) {
-        await _pollAndNavigateToRide(prefs);
-        return;
-      }
-
-      // 7. სხვა შემთხვევა — გადახდა ვერ მოხერხდა
       setState(()=>_starting=false);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(data['error']?.toString() ?? data['message']?.toString() ?? 'გადახდა ვერ მოხერხდა'),
-        backgroundColor: Colors.red,
+        content: Text(data['message']?.toString() ?? 'მგზავრობა ვერ დაიწყო'),
+        backgroundColor: Colors.red[700],
       ));
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('შეცდომა: $e')));
+      if (mounted) setState(()=>_starting=false);
     }
-    if (mounted) setState(()=>_starting=false);
-  }
-
-  // 15 ცდა × 2 წამი = 30 წამამდე ვცდით /api/trips/active-ს.
-  // ეს endpoint აბრუნებს active OR pending (10 წუთამდე) trip-ს,
-  // ანუ თუ BOG callback გვიან მოვა, polling-ი მაინც დააფიქსირებს trip-ს.
-  Future<void> _pollAndNavigateToRide(SharedPreferences prefs) async {
-    Map<String, dynamic>? statusData;
-    for (int i = 0; i < 15; i++) {
-      await Future.delayed(const Duration(seconds: 2));
-      try {
-        final h2 = await _authHeaders();
-        final statusRes = await http.get(
-            Uri.parse('$BASE_URL/api/trips/active'), headers: h2);
-        final d = jsonDecode(statusRes.body);
-        if (d['active'] == true && d['trip_id'] != null) {
-          statusData = Map<String, dynamic>.from(d as Map);
-          break;
-        }
-      } catch (_) {}
-    }
-    if (!mounted) return;
-    if (statusData != null) {
-      await prefs.setInt('active_trip_id', statusData['trip_id'] as int);
-      await prefs.setString('active_device_id', widget.deviceId);
-      Navigator.pushAndRemoveUntil(context,
-          _route(ActiveRideScreen(
-            tripId: statusData['trip_id'] as int,
-            deviceId: widget.deviceId,
-            perMinuteRate: _perMinuteRate,
-            unlockFee: _unlockFee,
-            perKmRate: _perKmRate,
-            vehicleType: _vehicleType,
-          )),
-              (_)=>false);
-      return;
-    }
-    setState(()=>_starting=false);
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('გადახდა გავიდა, მგზავრობა ვერ დაიწყო. სცადე ისტორიის ტაბი.'),
-      backgroundColor: Colors.orange,
-    ));
   }
 
   @override Widget build(BuildContext context) {
@@ -1434,18 +1399,12 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
         final dist = Geolocator.distanceBetween(
             _prevPos!.latitude, _prevPos!.longitude,
             newPos.latitude, newPos.longitude);
-        // ქვედა ზღვარი (2მ) — GPS-ის noise/drift-ის გასაფილტრად.
-        // ზედა ზღვარი (100მ) — 5 წამში > 100მ ნიშნავს > 72 კმ/სთ-ს, ე.ი. ან teleport-ი
-        // (default → real GPS), ან GPS jump. სქროლი ამდენ სიჩქარეს ვერ ავითარებს.
-        if (dist > 2 && dist < 100) {
+        if (dist > 2) {
           setState(() => _distanceKm += dist / 1000);
         }
       }
       setState(() {
-        // FIX: _prevPos = newPos (იყო _currentPos). ძველი ლოგიკა პირველი GPS update-ის
-        // შემდეგ _prevPos-ად ანიჭებდა default Tbilisi-ის კოორდინატებს და მეორე update-ზე
-        // distance(Tbilisi, real_GPS) ≈ 186 კმ მანძილში ემატებოდა.
-        _prevPos = newPos;
+        _prevPos = _currentPos;
         _currentPos = newPos;
       });
       // Camera follow user
@@ -1490,6 +1449,8 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
         'device_id': widget.deviceId,
         'latitude': _currentPos.latitude,
         'longitude': _currentPos.longitude,
+        'duration_seconds': _seconds,
+        'distance_km': double.parse(_distanceKm.toStringAsFixed(3)),
       };
       final res = await http.post(Uri.parse('$BASE_URL/api/trips/end'), headers: h, body: jsonEncode(body));
       final data = jsonDecode(res.body);
@@ -1818,6 +1779,9 @@ class _MenuScreenState extends State<MenuScreen> {
               trailing: !_verified ? _badge('Unverified', Colors.yellow[700]!) : null,
               onTap: () => Navigator.push(context, _route(AccountSettingsScreen(onUpdate: _load)))),
           _div(),
+          _tile(Icons.account_balance_wallet_outlined, 'საფულე',
+              onTap: () => Navigator.push(context, _route(const WalletScreen()))),
+          _div(),
           _tile(Icons.credit_card_outlined, 'Wallet & Payments',
               trailing: !_hasCard ? _badge('ბარათი არ არის', kOrange) : null,
               onTap: () => Navigator.push(context, _route(const CardScreen())).then((_)=>_load())),
@@ -2141,4 +2105,276 @@ class HowToRideScreen extends StatelessWidget {
             const SizedBox(height:10),Text(title,style:const TextStyle(fontWeight:FontWeight.bold,color:kDark,fontSize:15)),
             const SizedBox(height:4),Text(desc,style:TextStyle(color:Colors.grey[600],fontSize:13,height:1.5))])))]);
       }));
+}
+
+// ═══════════════════════════════════════════════════════════
+// WALLET SCREEN — ბალანსი + Top-up ღილაკები + Transactions
+// ═══════════════════════════════════════════════════════════
+class WalletScreen extends StatefulWidget {
+  const WalletScreen({super.key});
+  @override State<WalletScreen> createState() => _WalletScreenState();
+}
+
+class _WalletScreenState extends State<WalletScreen> {
+  double _balance = 0;
+  List _transactions = [];
+  bool _loading = true;
+  bool _topupBusy = false;
+
+  @override void initState() { super.initState(); _load(); }
+
+  Future<Map<String, String>> _hdr() async {
+    final prefs = await SharedPreferences.getInstance();
+    final t = prefs.getString('session_token') ?? '';
+    return {'Content-Type': 'application/json', 'Authorization': 'Bearer $t'};
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final r = await http.get(Uri.parse('$BASE_URL/api/wallet/balance'), headers: await _hdr());
+      final d = jsonDecode(r.body);
+      if (d['success'] == true && mounted) {
+        setState(() {
+          _balance = (d['balance'] as num?)?.toDouble() ?? 0;
+          _transactions = d['transactions'] as List? ?? [];
+        });
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _topup(double amount) async {
+    if (_topupBusy) return;
+    setState(() => _topupBusy = true);
+    try {
+      final r = await http.post(
+        Uri.parse('$BASE_URL/api/wallet/topup'),
+        headers: await _hdr(),
+        body: jsonEncode({'amount': amount}),
+      );
+      final d = jsonDecode(r.body);
+
+      if (d['success'] != true) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          backgroundColor: Colors.red[700],
+          content: Text(d['message']?.toString() ?? 'შევსება ვერ მოხერხდა'),
+        ));
+        return;
+      }
+
+      // auto_completed — saved card-ით 3DS გარეშე
+      if (d['auto_completed'] == true) {
+        await Future.delayed(const Duration(seconds: 2)); // callback-ის ლოდინი
+        await _load();
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          backgroundColor: kGreen,
+          content: Text('საფულე შეივსო: +₾${amount.toStringAsFixed(2)}'),
+        ));
+        return;
+      }
+
+      // BOG WebView
+      if (d['redirect_url'] != null && mounted) {
+        final ok = await Navigator.push<bool>(context, MaterialPageRoute<bool>(
+          builder: (_) => BogWebViewScreen(
+            url: d['redirect_url'] as String,
+            title: 'საფულის შევსება — ₾${amount.toStringAsFixed(2)}',
+            onSuccess: () async {},
+          ),
+        ));
+        if (ok == true) {
+          // 15 ცდა × 2 წამი — callback-ის ლოდინი
+          double oldBal = _balance;
+          for (int i = 0; i < 15; i++) {
+            await Future.delayed(const Duration(seconds: 2));
+            await _load();
+            if (_balance > oldBal) break;
+          }
+          if (mounted && _balance > oldBal) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              backgroundColor: kGreen,
+              content: Text('საფულე შეივსო: +₾${(_balance - oldBal).toStringAsFixed(2)}'),
+            ));
+          } else if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              backgroundColor: Colors.orange,
+              content: Text('გადახდა მუშავდება. ისტორიის ჩანართში შეამოწმე.'),
+            ));
+          }
+        }
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        backgroundColor: Colors.red[700],
+        content: Text('შეცდომა: ${e.toString()}'),
+      ));
+    } finally {
+      if (mounted) setState(() => _topupBusy = false);
+    }
+  }
+
+  String _txTypeLabel(String type) {
+    switch (type) {
+      case 'topup':  return 'შევსება';
+      case 'trip':   return 'მგზავრობა';
+      case 'refund': return 'დაბრუნება';
+      case 'adjust': return 'კორექცია';
+      default:       return type;
+    }
+  }
+
+  IconData _txIcon(String type) {
+    switch (type) {
+      case 'topup':  return Icons.add_circle_outline;
+      case 'trip':   return Icons.electric_scooter;
+      case 'refund': return Icons.replay_circle_filled_outlined;
+      default:       return Icons.swap_horiz;
+    }
+  }
+
+  String _fmtDate(String iso) {
+    try {
+      final d = DateTime.parse(iso).toLocal();
+      return '${d.day.toString().padLeft(2,'0')}.${d.month.toString().padLeft(2,'0')} ${d.hour.toString().padLeft(2,'0')}:${d.minute.toString().padLeft(2,'0')}';
+    } catch (_) { return iso; }
+  }
+
+  @override Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: kBg,
+      appBar: AppBar(
+        title: const Text('საფულე', style: TextStyle(color: Colors.white)),
+        backgroundColor: kDark,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)),
+      ),
+      body: RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(padding: const EdgeInsets.all(16), children: [
+          // ── ბალანსის ბარათი ──
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [kDark, Color(0xFF2A4034)],
+                begin: Alignment.topLeft, end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 14, offset: const Offset(0, 4))],
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Row(children: [
+                Icon(Icons.account_balance_wallet, color: kGreen, size: 22),
+                SizedBox(width: 8),
+                Text('მიმდინარე ბალანსი', style: TextStyle(color: Colors.white70, fontSize: 14)),
+              ]),
+              const SizedBox(height: 12),
+              _loading
+                  ? const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)))
+                  : Text('₾${_balance.toStringAsFixed(2)}',
+                      style: const TextStyle(color: Colors.white, fontSize: 38, fontWeight: FontWeight.bold)),
+            ]),
+          ),
+          const SizedBox(height: 24),
+
+          // ── Top-up ღილაკები ──
+          const Text('სწრაფი შევსება', style: TextStyle(color: kDark, fontWeight: FontWeight.bold, fontSize: 16)),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(child: _topupButton(5)),
+            const SizedBox(width: 10),
+            Expanded(child: _topupButton(10)),
+            const SizedBox(width: 10),
+            Expanded(child: _topupButton(20)),
+          ]),
+          const SizedBox(height: 24),
+
+          // ── Transactions ──
+          const Text('ბოლო ოპერაციები', style: TextStyle(color: kDark, fontWeight: FontWeight.bold, fontSize: 16)),
+          const SizedBox(height: 8),
+          if (_transactions.isEmpty && !_loading)
+            Padding(padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Center(child: Text('ჯერ არ გაქვს ოპერაციები', style: TextStyle(color: Colors.grey[600]))))
+          else
+            ..._transactions.map((tx) => _txTile(tx)).toList(),
+        ]),
+      ),
+    );
+  }
+
+  Widget _topupButton(double amount) {
+    return ElevatedButton(
+      onPressed: _topupBusy ? null : () => _topup(amount),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: kGreen,
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        disabledBackgroundColor: kGreen.withOpacity(0.4),
+      ),
+      child: _topupBusy
+          ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+          : Text('₾${amount.toStringAsFixed(0)}',
+              style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+    );
+  }
+
+  Widget _txTile(dynamic tx) {
+    final type = tx['type']?.toString() ?? '';
+    final amount = (tx['amount'] as num?)?.toDouble() ?? 0;
+    final balanceAfter = (tx['balance_after'] as num?)?.toDouble() ?? 0;
+    final status = tx['status']?.toString() ?? '';
+    final desc = tx['description']?.toString() ?? '';
+    final created = tx['created_at']?.toString() ?? '';
+
+    final isCredit = amount > 0;
+    final isPending = status == 'pending';
+    final isFailed = status == 'failed';
+
+    Color amountColor;
+    if (isFailed) amountColor = Colors.grey;
+    else if (isPending) amountColor = kOrange;
+    else amountColor = isCredit ? kGreen : Colors.red[700]!;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 6)],
+      ),
+      child: Row(children: [
+        Container(
+          width: 40, height: 40,
+          decoration: BoxDecoration(color: amountColor.withOpacity(0.1), shape: BoxShape.circle),
+          child: Icon(_txIcon(type), color: amountColor, size: 20),
+        ),
+        const SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Text(_txTypeLabel(type), style: const TextStyle(fontWeight: FontWeight.bold, color: kDark, fontSize: 14)),
+            if (isPending) ...[const SizedBox(width: 6), Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(color: kOrange.withOpacity(0.15), borderRadius: BorderRadius.circular(8)),
+              child: const Text('მიმდინარე', style: TextStyle(color: kOrange, fontSize: 10, fontWeight: FontWeight.w600)))],
+            if (isFailed) ...[const SizedBox(width: 6), Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(color: Colors.grey.withOpacity(0.15), borderRadius: BorderRadius.circular(8)),
+              child: const Text('წარუმატებელი', style: TextStyle(color: Colors.grey, fontSize: 10, fontWeight: FontWeight.w600)))],
+          ]),
+          if (desc.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 2),
+              child: Text(desc, style: TextStyle(color: Colors.grey[600], fontSize: 12))),
+          Text(_fmtDate(created), style: TextStyle(color: Colors.grey[500], fontSize: 11)),
+        ])),
+        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          Text('${isCredit ? '+' : ''}₾${amount.toStringAsFixed(2)}',
+              style: TextStyle(color: amountColor, fontWeight: FontWeight.bold, fontSize: 15)),
+          if (!isPending && !isFailed)
+            Text('₾${balanceAfter.toStringAsFixed(2)}', style: TextStyle(color: Colors.grey[500], fontSize: 11)),
+        ]),
+      ]),
+    );
+  }
 }
