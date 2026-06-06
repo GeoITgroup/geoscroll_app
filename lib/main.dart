@@ -993,9 +993,19 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
     final confirmed = await _showTariffSheet();
     if (!confirmed) return;
 
-    // 4. ბარათი
+    // 4. ბარათი — server-დან აქტუალური სტატუსი (prefs შეიძლება მოძველდეს)
     final prefs = await SharedPreferences.getInstance();
-    final hasCard = prefs.getBool('has_card') ?? false;
+    bool hasCard = false;
+    try {
+      final hh = await _authHeaders();
+      final cardRes = await http.get(Uri.parse('$BASE_URL/api/user/card-status'), headers: hh);
+      final cardData = jsonDecode(cardRes.body);
+      hasCard = cardData['has_card'] == true;
+      await prefs.setBool('has_card', hasCard);  // prefs-ის სინქრონიზაცია
+    } catch (_) {
+      // network შეცდომა → fall back to cached prefs
+      hasCard = prefs.getBool('has_card') ?? false;
+    }
     if (!hasCard) {
       if (mounted) showDialog(context: context, builder: (_) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
