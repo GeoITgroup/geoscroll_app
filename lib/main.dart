@@ -14,7 +14,7 @@ import 'dart:convert';
 import 'dart:async';
 
 const String BASE_URL    = 'https://velocar.ge';
-const String APP_VERSION = '1.0.2';
+const String APP_VERSION = '1.0.3';
 
 const kGreen      = Color(0xFF2E9E6B);
 const kGreenLight = Color(0xFF4CAF80);
@@ -540,7 +540,18 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
     }
     final polygons = <Polygon>{};
     int gi = 0;
+    // ─── მხოლოდ ის გეოფენსები, რომელიც სქროლს მინიჭებული აქვს ───
+    final assignedIds = <int>{};
+    for (final s in _scooters) {
+      final gid = s['geofence_id'];
+      if (gid != null) {
+        final id = int.tryParse(gid.toString());
+        if (id != null) assignedIds.add(id);
+      }
+    }
     for (final g in _geofences) {
+      final gid = int.tryParse(g['id']?.toString() ?? '');
+      if (gid == null || !assignedIds.contains(gid)) continue; // არ ჩვენდება არამინიჭებული
       final pts = _parseGeofence(g);
       if (pts.isEmpty) continue;
       polygons.add(Polygon(
@@ -2130,17 +2141,21 @@ class _WalletScreenState extends State<WalletScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    if (mounted) setState(() => _loading = true);
     try {
       final r = await http.get(Uri.parse('$BASE_URL/api/wallet/balance'), headers: await _hdr());
       final d = jsonDecode(r.body);
-      if (d['success'] == true && mounted) {
+      if (d is Map && d['success'] == true && mounted) {
         setState(() {
-          _balance = (d['balance'] as num?)?.toDouble() ?? 0;
-          _transactions = d['transactions'] as List? ?? [];
+          final b = d['balance'];
+          _balance = (b is num) ? b.toDouble() : double.tryParse(b?.toString() ?? '') ?? 0;
+          final txs = d['transactions'];
+          _transactions = (txs is List) ? txs : [];
         });
       }
-    } catch (_) {}
+    } catch (e) {
+      // ignore — UI keeps last known state
+    }
     if (mounted) setState(() => _loading = false);
   }
 
@@ -2233,7 +2248,8 @@ class _WalletScreenState extends State<WalletScreen> {
     }
   }
 
-  String _fmtDate(String iso) {
+  String _fmtDate(String? iso) {
+    if (iso == null || iso.isEmpty) return '';
     try {
       final d = DateTime.parse(iso).toLocal();
       return '${d.day.toString().padLeft(2,'0')}.${d.month.toString().padLeft(2,'0')} ${d.hour.toString().padLeft(2,'0')}:${d.minute.toString().padLeft(2,'0')}';
@@ -2321,12 +2337,13 @@ class _WalletScreenState extends State<WalletScreen> {
   }
 
   Widget _txTile(dynamic tx) {
+    if (tx == null || tx is! Map) return const SizedBox.shrink();
     final type = tx['type']?.toString() ?? '';
-    final amount = (tx['amount'] as num?)?.toDouble() ?? 0;
-    final balanceAfter = (tx['balance_after'] as num?)?.toDouble() ?? 0;
+    final amount = (tx['amount'] is num) ? (tx['amount'] as num).toDouble() : double.tryParse(tx['amount']?.toString() ?? '') ?? 0;
+    final balanceAfter = (tx['balance_after'] is num) ? (tx['balance_after'] as num).toDouble() : double.tryParse(tx['balance_after']?.toString() ?? '') ?? 0;
     final status = tx['status']?.toString() ?? '';
     final desc = tx['description']?.toString() ?? '';
-    final created = tx['created_at']?.toString() ?? '';
+    final created = tx['created_at']?.toString();
 
     final isCredit = amount > 0;
     final isPending = status == 'pending';
