@@ -526,9 +526,20 @@ class _MapHomeScreenState extends State<MapHomeScreen> {
         onTap: () => _showInfo(context, s),
       ));
     }
+    // მხოლოდ ის geofence-ები გამოვაჩინოთ რომელთა ID-ც ფიგურირებს scooter-ების geofence_id-ში.
+    // უმინიჭებო ზონები (რომელზე არცერთი vehicle არ მდებარეობს) რუკაზე არ ჩანდეს.
+    final assignedGeoIds = <int>{};
+    for (final s in _scooters) {
+      final gid = s['geofence_id'];
+      if (gid == null) continue;
+      final id = int.tryParse(gid.toString());
+      if (id != null) assignedGeoIds.add(id);
+    }
     final polygons = <Polygon>{};
     int gi = 0;
     for (final g in _geofences) {
+      final gid = int.tryParse((g['id'] ?? '').toString());
+      if (gid == null || !assignedGeoIds.contains(gid)) continue;
       final pts = _parseGeofence(g);
       if (pts.isEmpty) continue;
       polygons.add(Polygon(
@@ -1102,7 +1113,7 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
         return;
       }
 
-      // 5. BOG redirect → WebView
+      // 5. BOG redirect → WebView (3DS საჭიროა)
       if (data['success']==true && data['redirect_url']!=null) {
         setState(()=>_starting=false);
         if (!mounted) return;
@@ -1115,67 +1126,70 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
         ));
         if (result == true && mounted) {
           setState(()=>_starting=true);
-          Map<String, dynamic>? statusData;
-          // 15 ცდა × 2 წამი = 30 წამამდე — BOG callback ხანდახან გვიან მოდის
-          for (int i = 0; i < 15; i++) {
-            await Future.delayed(const Duration(seconds: 2));
-            try {
-              final h2 = await _authHeaders();
-              final statusRes = await http.get(
-                  Uri.parse('$BASE_URL/api/trips/active'), headers: h2);
-              final d = jsonDecode(statusRes.body);
-              if (d['active'] == true && d['trip_id'] != null) {
-                statusData = Map<String, dynamic>.from(d as Map);
-                break;
-              }
-            } catch (_) {}
-          }
-          if (statusData != null && mounted) {
-            await prefs.setInt('active_trip_id', statusData['trip_id'] as int);
-            await prefs.setString('active_device_id', widget.deviceId);
-            Navigator.pushAndRemoveUntil(context,
-                _route(ActiveRideScreen(
-                  tripId: statusData['trip_id'] as int,
-                  deviceId: widget.deviceId,
-                  perMinuteRate: _perMinuteRate,
-                  unlockFee: _unlockFee,
-                  perKmRate: _perKmRate,
-                  vehicleType: _vehicleType,
-                )),
-                    (_)=>false);
-            return;
-          }
-          setState(()=>_starting=false);
-          if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('გადახდა გავიდა, მგზავრობა ვერ დაიწყო. სცადე ისტორიის ტაბი.'),
-            backgroundColor: Colors.orange,
-          ));
+          await _pollAndNavigateToRide(prefs);
         }
         return;
       }
 
-      // 6. ბარათი შენახულია — პირდაპირ trip იწყება
-      final tr = await http.post(Uri.parse('$BASE_URL/api/trips/start'), headers: h,
-          body: jsonEncode({'device_id': widget.deviceId, 'user_id': prefs.getInt('user_id')??1}));
-      final td = jsonDecode(tr.body);
-      if (td['success']==true && mounted) {
-        await prefs.setInt('active_trip_id', td['trip_id'] as int);
-        await prefs.setString('active_device_id', widget.deviceId);
-        Navigator.pushAndRemoveUntil(context,
-            _route(ActiveRideScreen(
-              tripId: td['trip_id'] as int,
-              deviceId: widget.deviceId,
-              perMinuteRate: _perMinuteRate,
-              unlockFee: _unlockFee,
-              perKmRate: _perKmRate,
-              vehicleType: _vehicleType,
-            )),
-                (_)=>false);
+      // 6. 3DS-ის გარეშე — saved card-ით პირდაპირ ჩამოეჭრა (auto_started: true)
+      //    /api/bog/pay-მ უკვე შექმნა trip — polling-ით ველოდებით active სტატუსს.
+      //    NB: /api/trips/start აღარ გვიწოდია — ის dev-only endpoint-ია და duplicate trip-ს ქმნიდა.
+      if (data['success']==true) {
+        await _pollAndNavigateToRide(prefs);
+        return;
       }
+
+      // 7. სხვა შემთხვევა — გადახდა ვერ მოხერხდა
+      setState(()=>_starting=false);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(data['error']?.toString() ?? data['message']?.toString() ?? 'გადახდა ვერ მოხერხდა'),
+        backgroundColor: Colors.red,
+      ));
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('შეცდომა: $e')));
     }
     if (mounted) setState(()=>_starting=false);
+  }
+
+  // 15 ცდა × 2 წამი = 30 წამამდე ვცდით /api/trips/active-ს.
+  // ეს endpoint აბრუნებს active OR pending (10 წუთამდე) trip-ს,
+  // ანუ თუ BOG callback გვიან მოვა, polling-ი მაინც დააფიქსირებს trip-ს.
+  Future<void> _pollAndNavigateToRide(SharedPreferences prefs) async {
+    Map<String, dynamic>? statusData;
+    for (int i = 0; i < 15; i++) {
+      await Future.delayed(const Duration(seconds: 2));
+      try {
+        final h2 = await _authHeaders();
+        final statusRes = await http.get(
+            Uri.parse('$BASE_URL/api/trips/active'), headers: h2);
+        final d = jsonDecode(statusRes.body);
+        if (d['active'] == true && d['trip_id'] != null) {
+          statusData = Map<String, dynamic>.from(d as Map);
+          break;
+        }
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    if (statusData != null) {
+      await prefs.setInt('active_trip_id', statusData['trip_id'] as int);
+      await prefs.setString('active_device_id', widget.deviceId);
+      Navigator.pushAndRemoveUntil(context,
+          _route(ActiveRideScreen(
+            tripId: statusData['trip_id'] as int,
+            deviceId: widget.deviceId,
+            perMinuteRate: _perMinuteRate,
+            unlockFee: _unlockFee,
+            perKmRate: _perKmRate,
+            vehicleType: _vehicleType,
+          )),
+              (_)=>false);
+      return;
+    }
+    setState(()=>_starting=false);
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('გადახდა გავიდა, მგზავრობა ვერ დაიწყო. სცადე ისტორიის ტაბი.'),
+      backgroundColor: Colors.orange,
+    ));
   }
 
   @override Widget build(BuildContext context) {
@@ -1420,12 +1434,18 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
         final dist = Geolocator.distanceBetween(
             _prevPos!.latitude, _prevPos!.longitude,
             newPos.latitude, newPos.longitude);
-        if (dist > 2) {
+        // ქვედა ზღვარი (2მ) — GPS-ის noise/drift-ის გასაფილტრად.
+        // ზედა ზღვარი (100მ) — 5 წამში > 100მ ნიშნავს > 72 კმ/სთ-ს, ე.ი. ან teleport-ი
+        // (default → real GPS), ან GPS jump. სქროლი ამდენ სიჩქარეს ვერ ავითარებს.
+        if (dist > 2 && dist < 100) {
           setState(() => _distanceKm += dist / 1000);
         }
       }
       setState(() {
-        _prevPos = _currentPos;
+        // FIX: _prevPos = newPos (იყო _currentPos). ძველი ლოგიკა პირველი GPS update-ის
+        // შემდეგ _prevPos-ად ანიჭებდა default Tbilisi-ის კოორდინატებს და მეორე update-ზე
+        // distance(Tbilisi, real_GPS) ≈ 186 კმ მანძილში ემატებოდა.
+        _prevPos = newPos;
         _currentPos = newPos;
       });
       // Camera follow user
