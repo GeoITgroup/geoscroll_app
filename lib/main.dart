@@ -14,7 +14,7 @@ import 'dart:convert';
 import 'dart:async';
 
 const String BASE_URL    = 'https://velocar.ge';
-const String APP_VERSION = '1.0.5';
+const String APP_VERSION = '1.0.6';
 
 const kGreen      = Color(0xFF2E9E6B);
 const kGreenLight = Color(0xFF4CAF80);
@@ -1427,6 +1427,8 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     if (mounted) setState(() => _inZone = inAny);
   }
 
+  DateTime? _prevPosTime;
+
   Future<void> _updateLocation() async {
     try {
       var perm = await Geolocator.checkPermission();
@@ -1434,16 +1436,32 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
       if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) return;
       final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
       final newPos = LatLng(pos.latitude, pos.longitude);
-      if (_prevPos != null) {
+      final now = DateTime.now();
+
+      // ── GPS outlier rejection ──
+      // 1. დაბალი ხარისხის fix-ი (accuracy >50m) — distance-ში არ ვითვლით
+      // 2. სიჩქარის sanity check — სქროლი მაქს 30 m/s (108 km/h)-ზე ნაკლები
+      // 3. min threshold 3m — ცადო ცადო GPS noise-ი
+      if (_prevPos != null && _prevPosTime != null) {
         final dist = Geolocator.distanceBetween(
             _prevPos!.latitude, _prevPos!.longitude,
             newPos.latitude, newPos.longitude);
-        if (dist > 2) {
+        final dtSec = now.difference(_prevPosTime!).inMilliseconds / 1000.0;
+        final acc = pos.accuracy;
+        final speed = (dtSec > 0) ? (dist / dtSec) : 0;
+
+        final accuracyOk = (acc <= 50); // m
+        final speedOk = (speed <= 30);  // m/s ≈ 108 km/h
+        final aboveNoise = (dist >= 3); // ცადო GPS jitter
+
+        if (accuracyOk && speedOk && aboveNoise) {
           setState(() => _distanceKm += dist / 1000);
         }
+        // ცადო ცადო ცადო skip-ი ცადო (debug-ისთვის log დავიტოვო)
       }
       setState(() {
-        _prevPos = _currentPos;
+        _prevPos = newPos;
+        _prevPosTime = now;
         _currentPos = newPos;
       });
       // Camera follow user
