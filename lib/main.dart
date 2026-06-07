@@ -14,7 +14,7 @@ import 'dart:convert';
 import 'dart:async';
 
 const String BASE_URL    = 'https://velocar.ge';
-const String APP_VERSION = '1.0.3';
+const String APP_VERSION = '1.0.4';
 
 const kGreen      = Color(0xFF2E9E6B);
 const kGreenLight = Color(0xFF4CAF80);
@@ -2168,7 +2168,30 @@ class _WalletScreenState extends State<WalletScreen> {
         headers: await _hdr(),
         body: jsonEncode({'amount': amount}),
       );
-      final d = jsonDecode(r.body);
+
+      // HTTP error — სრული debug info snackbar-ში
+      if (r.statusCode != 200) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          backgroundColor: Colors.red[700],
+          duration: const Duration(seconds: 8),
+          content: Text('HTTP ${r.statusCode}: ${r.body.substring(0, r.body.length > 200 ? 200 : r.body.length)}'),
+        ));
+        return;
+      }
+
+      Map<String, dynamic> d;
+      try {
+        final decoded = jsonDecode(r.body);
+        if (decoded is! Map) throw Exception('Not a JSON object');
+        d = Map<String, dynamic>.from(decoded);
+      } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          backgroundColor: Colors.red[700],
+          duration: const Duration(seconds: 8),
+          content: Text('JSON parse: ${r.body.substring(0, r.body.length > 200 ? 200 : r.body.length)}'),
+        ));
+        return;
+      }
 
       if (d['success'] != true) {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -2305,6 +2328,17 @@ class _WalletScreenState extends State<WalletScreen> {
             const SizedBox(width: 10),
             Expanded(child: _topupButton(20)),
           ]),
+          const SizedBox(height: 12),
+          SizedBox(width: double.infinity, child: OutlinedButton.icon(
+            onPressed: _topupBusy ? null : _showCustomAmountDialog,
+            icon: const Icon(Icons.edit, color: kGreen, size: 18),
+            label: const Text('სხვა თანხა', style: TextStyle(color: kGreen, fontSize: 15, fontWeight: FontWeight.w600)),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              side: BorderSide(color: kGreen.withOpacity(0.5), width: 1.5),
+            ),
+          )),
           const SizedBox(height: 24),
 
           // ── Transactions ──
@@ -2318,6 +2352,58 @@ class _WalletScreenState extends State<WalletScreen> {
         ]),
       ),
     );
+  }
+
+  void _showCustomAmountDialog() {
+    final ctrl = TextEditingController();
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: const Row(children: [
+        Icon(Icons.account_balance_wallet, color: kGreen),
+        SizedBox(width: 8),
+        Text('თანხის შეყვანა'),
+      ]),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Text('შეიყვანე სასურველი თანხა ₾-ში', style: TextStyle(fontSize: 13, color: Colors.grey)),
+        const SizedBox(height: 12),
+        TextField(
+          controller: ctrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          autofocus: true,
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: kDark),
+          decoration: InputDecoration(
+            prefixText: '₾ ',
+            prefixStyle: const TextStyle(fontSize: 24, color: kGreen, fontWeight: FontWeight.bold),
+            hintText: '0.00',
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: kGreen.withOpacity(0.5))),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: kGreen, width: 2)),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text('მინიმუმი ₾1.00, მაქსიმუმი ₾500.00', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+      ]),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('გაუქმება')),
+        ElevatedButton(
+          onPressed: () {
+            final raw = ctrl.text.trim().replaceAll(',', '.');
+            final amount = double.tryParse(raw);
+            if (amount == null || amount < 1 || amount > 500) {
+              ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                backgroundColor: Colors.red,
+                content: Text('თანხა უნდა იყოს ₾1-₾500 დიაპაზონში'),
+              ));
+              return;
+            }
+            Navigator.pop(ctx);
+            _topup(double.parse(amount.toStringAsFixed(2)));
+          },
+          style: ElevatedButton.styleFrom(backgroundColor: kGreen),
+          child: const Text('შევსება', style: TextStyle(color: Colors.white)),
+        ),
+      ],
+    ));
   }
 
   Widget _topupButton(double amount) {
