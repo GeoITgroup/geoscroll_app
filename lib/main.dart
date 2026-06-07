@@ -14,7 +14,7 @@ import 'dart:convert';
 import 'dart:async';
 
 const String BASE_URL    = 'https://velocar.ge';
-const String APP_VERSION = '1.0.4';
+const String APP_VERSION = '1.0.5';
 
 const kGreen      = Color(0xFF2E9E6B);
 const kGreenLight = Color(0xFF4CAF80);
@@ -212,6 +212,13 @@ class BogWebViewScreen extends StatefulWidget {
 class _BogWebViewScreenState extends State<BogWebViewScreen> {
   late final WebViewController _controller;
   bool _loading = true;
+  bool _closed = false;
+
+  void _closeWith(bool result) {
+    if (_closed || !mounted) return;
+    _closed = true;
+    Navigator.pop(context, result);
+  }
 
   @override
   void initState() {
@@ -219,17 +226,21 @@ class _BogWebViewScreenState extends State<BogWebViewScreen> {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(NavigationDelegate(
-        onPageStarted: (_) => setState(() => _loading = true),
+        onPageStarted: (_) {
+          if (mounted) setState(() => _loading = true);
+        },
         onPageFinished: (url) {
-          setState(() => _loading = false);
+          if (mounted) setState(() => _loading = false);
           if (url.contains('velocar.ge/api/bog/callback') ||
               url.contains('velocar.ge/payment/success') ||
               url.contains('card-success')) {
             widget.onSuccess?.call();
-            Navigator.pop(context, true);
+            // ── 2 წამიანი delay — user-ი ცადო „წარმატება" ცადო ცადო ──
+            Future.delayed(const Duration(seconds: 2), () => _closeWith(true));
+            return;
           }
-          if (url.contains('payment/fail')) {
-            Navigator.pop(context, false);
+          if (url.contains('payment/fail') || url.contains('payment/cancel')) {
+            Future.delayed(const Duration(seconds: 2), () => _closeWith(false));
           }
         },
       ))
@@ -244,7 +255,7 @@ class _BogWebViewScreenState extends State<BogWebViewScreen> {
           title: Text(widget.title, style: const TextStyle(color: Colors.white, fontSize: 15)),
           leading: IconButton(
               icon: const Icon(Icons.close, color: Colors.white),
-              onPressed: () => Navigator.pop(context, false)),
+              onPressed: () => _closeWith(false)),
           actions: [
             if (_loading)
               const Padding(
@@ -1030,7 +1041,7 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
           SizedBox(width: double.infinity, height: 54,
               child: ElevatedButton.icon(
                   icon: const Icon(Icons.payment, color: Colors.white),
-                  label: const Text('გადახდა და გახსნა',
+                  label: const Text('ბალანსით გადახდა',
                       style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
                   style: ElevatedButton.styleFrom(backgroundColor: kGreen,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
@@ -1211,7 +1222,7 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
                   icon: _starting
                       ? const SizedBox(width:20,height:20,child:CircularProgressIndicator(color:Colors.white,strokeWidth:2))
                       : const Icon(Icons.payment, color: Colors.white),
-                  label: Text(_starting ? 'მუშავდება...' : 'გადახდა და გახსნა',
+                  label: Text(_starting ? 'მუშავდება...' : 'ბალანსით გადახდა',
                       style: const TextStyle(fontSize:16, fontWeight:FontWeight.bold, color:Colors.white)),
                   style: ElevatedButton.styleFrom(backgroundColor: kGreen,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
@@ -1317,10 +1328,27 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   Future<void> _loadGeofences() async {
     try {
       final h = await _authHeaders();
+      // ── ჯერ ცადო ცადო ცადო scooter-ის ცადო geofence_id ──
+      final sRes = await http.get(Uri.parse('$BASE_URL/api/scooters'), headers: h);
+      final sData = jsonDecode(sRes.body);
+      int? assignedGeofenceId;
+      if (sData is List) {
+        for (final s in sData) {
+          if (s is Map && s['device_id']?.toString() == widget.deviceId) {
+            final gid = s['geofence_id'];
+            if (gid != null) assignedGeofenceId = int.tryParse(gid.toString());
+            break;
+          }
+        }
+      }
+      // ── geofences fetch + ცადო ცადო ცადო ცადო ცადო ──
       final res = await http.get(Uri.parse('$BASE_URL/api/geofences'), headers: h);
       final d = jsonDecode(res.body);
       if (d is List) {
-        setState(() => _geofences = d);
+        final filtered = (assignedGeofenceId == null)
+            ? <dynamic>[]                                              // ცადო geofence ცადო ცადო — ცადო ცადო
+            : d.where((g) => g is Map && int.tryParse(g['id']?.toString() ?? '') == assignedGeofenceId).toList();
+        setState(() => _geofences = filtered);
         _rebuildPolygons();
       }
     } catch (_) {}
@@ -1441,10 +1469,17 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   }
 
   Future<void> _endRide() async {
+    // ── snapshot ცადო ცადო ცადო ცადო timer dialog-ის ცადო ცადო ცადო ──
+    final endSeconds = _seconds;
+    final endDistance = _distanceKm;
+    final endMinutes = endSeconds / 60;
+    final endCost = _unlockFee + (endMinutes * _perMinuteRate) + (endDistance * _perKmRate);
+    final endTimeStr = '${(endSeconds ~/ 60).toString().padLeft(2,'0')}:${(endSeconds % 60).toString().padLeft(2,'0')}';
+
     final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('მგზავრობის დასრულება'),
-        content: Text('დრო: $_timeStr\nმანძილი: ${_distanceKm.toStringAsFixed(2)} კმ\nღირებულება: ₾${_cost.toStringAsFixed(2)}\n\nდარწმუნებული ხარ?'),
+        content: Text('დრო: $endTimeStr\nმანძილი: ${endDistance.toStringAsFixed(2)} კმ\nღირებულება: ₾${endCost.toStringAsFixed(2)}\n\nდარწმუნებული ხარ?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('გაგრძელება')),
           ElevatedButton(onPressed: () => Navigator.pop(context, true),
@@ -1453,6 +1488,9 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
         ]));
     if (ok != true) return;
     setState(() => _ending = true);
+    // ── timer ცადო — ცადო ცადო ცადო ცადო ცადო ცადო ──
+    _timer?.cancel();
+    _locationTimer?.cancel();
     try {
       final h = await _authHeaders();
       final body = <String, dynamic>{
@@ -1460,8 +1498,8 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
         'device_id': widget.deviceId,
         'latitude': _currentPos.latitude,
         'longitude': _currentPos.longitude,
-        'duration_seconds': _seconds,
-        'distance_km': double.parse(_distanceKm.toStringAsFixed(3)),
+        'duration_seconds': endSeconds,
+        'distance_km': double.parse(endDistance.toStringAsFixed(3)),
       };
       final res = await http.post(Uri.parse('$BASE_URL/api/trips/end'), headers: h, body: jsonEncode(body));
       final data = jsonDecode(res.body);
