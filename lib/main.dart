@@ -14,7 +14,7 @@ import 'dart:convert';
 import 'dart:async';
 
 const String BASE_URL    = 'https://velocar.ge';
-const String APP_VERSION = '1.0.8';
+const String APP_VERSION = '1.0.9';
 
 const kGreen      = Color(0xFF2E9E6B);
 const kGreenLight = Color(0xFF4CAF80);
@@ -1150,6 +1150,18 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
         return;
       }
 
+      if (data['error'] == 'scooter_outside_zone') {
+        setState(()=>_starting=false);
+        if (mounted) showDialog(context: context, builder: (_) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Row(children: [Icon(Icons.location_off, color: Colors.red), SizedBox(width: 8), Flexible(child: Text('ზონის გარეთ'))]),
+            content: Text(data['message'] ?? 'მოწყობილობა მწვანე ზონის გარეთაა. გადაიტანე ზონაში, შემდეგ სცადე გაქირავება.'),
+            actions: [ElevatedButton(onPressed: ()=>Navigator.pop(context),
+                style: ElevatedButton.styleFrom(backgroundColor: kDark),
+                child: const Text('გასაგებია', style: TextStyle(color: Colors.white)))]));
+        return;
+      }
+
       // ── trip წარმატებით დაიწყო ──
       if (data['success'] == true && data['trip_id'] != null && mounted) {
         final prefs = await SharedPreferences.getInstance();
@@ -1309,6 +1321,19 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   Future<void> _syncPricing() async {
     try {
       final h = await _authHeaders();
+      // 1. trip active-ი — start_time-ის მისაღებად (timer-ის სწორად resume)
+      try {
+        final tRes = await http.get(Uri.parse('$BASE_URL/api/trips/active'), headers: h);
+        final td = jsonDecode(tRes.body);
+        if (td is Map && td['active'] == true && td['start_time'] != null) {
+          final startTime = DateTime.parse(td['start_time'].toString()).toUtc();
+          final elapsedSec = DateTime.now().toUtc().difference(startTime).inSeconds;
+          if (elapsedSec > 0 && mounted) {
+            setState(() => _seconds = elapsedSec);
+          }
+        }
+      } catch (_) {}
+      // 2. pricing — სქროლის აქტუალური ფასები
       final res = await http.get(Uri.parse('$BASE_URL/api/scooters'), headers: h);
       final d = jsonDecode(res.body);
       if (d is List) {
