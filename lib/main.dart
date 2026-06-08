@@ -14,7 +14,7 @@ import 'dart:convert';
 import 'dart:async';
 
 const String BASE_URL    = 'https://velocar.ge';
-const String APP_VERSION = '1.0.6';
+const String APP_VERSION = '1.0.8';
 
 const kGreen      = Color(0xFF2E9E6B);
 const kGreenLight = Color(0xFF4CAF80);
@@ -1032,7 +1032,7 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
             child: Row(children: [
               const Icon(Icons.info_outline, color: Colors.blue, size: 16),
               const SizedBox(width: 8),
-              Expanded(child: Text('გადახდა BOG ბარათით — უსაფრთხო',
+              Expanded(child: Text('გადახდა საფულის ბალანსიდან',
                   style: TextStyle(color: Colors.blue[700], fontSize: 12))),
             ]),
           ),
@@ -1424,7 +1424,30 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
       final pts = _parseGeofence(g);
       if (pts.isNotEmpty && _pointInPolygon(_currentPos, pts)) { inAny = true; break; }
     }
+    final wasInZone = _inZone;
     if (mounted) setState(() => _inZone = inAny);
+    // ── ცადო ცადო ცადო ცადო ცადო ცადო (in → out ან out → in) ──
+    if (wasInZone && !inAny && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        backgroundColor: Colors.red[700],
+        duration: const Duration(seconds: 5),
+        content: const Row(children: [
+          Icon(Icons.warning, color: Colors.white),
+          SizedBox(width: 8),
+          Expanded(child: Text('გაცდი მწვანე ზონას! დაბრუნდი მგზავრობის დასასრულებლად.')),
+        ]),
+      ));
+    } else if (!wasInZone && inAny && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        backgroundColor: kGreen,
+        duration: const Duration(seconds: 3),
+        content: const Row(children: [
+          Icon(Icons.check_circle, color: Colors.white),
+          SizedBox(width: 8),
+          Expanded(child: Text('მწვანე ზონაშია — ახლა შეგიძლია მგზავრობის დასრულება')),
+        ]),
+      ));
+    }
   }
 
   DateTime? _prevPosTime;
@@ -1541,7 +1564,7 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
         if (mounted) showDialog(context: context, barrierDismissible: false, builder: (_) => AlertDialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             title: const Row(children: [Icon(Icons.check_circle, color: kGreen), SizedBox(width: 8), Text('მგზავრობა დასრულდა')]),
-            content: Text('დრო: ${data['minutes']} წუთი\nმანძილი: ${_distanceKm.toStringAsFixed(2)} კმ\nგადახდილი: ₾${data['amount']}'),
+            content: Text('დრო: $endTimeStr\nმანძილი: ${endDistance.toStringAsFixed(2)} კმ\nგადახდილი: ₾${data['amount']}'),
             actions: [ElevatedButton(
                 onPressed: () => Navigator.pushAndRemoveUntil(context, _route(const MainScreen()), (_) => false),
                 style: ElevatedButton.styleFrom(backgroundColor: kGreen),
@@ -1630,6 +1653,32 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                 child: const Icon(Icons.my_location, color: kGreen),
               ),
             ),
+            // ── Zone violation banner — ცადო ცადო ცადო ცადო ცადო ──
+            if (!_inZone) Positioned(
+              left: 12,
+              right: 12,
+              bottom: 80,
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.red[700],
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 12, offset: const Offset(0, 4))],
+                  border: Border.all(color: Colors.white, width: 2),
+                ),
+                child: Row(children: [
+                  const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 28),
+                  const SizedBox(width: 12),
+                  const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('მწვანე ზონის გარეთ ხარ!',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                    SizedBox(height: 4),
+                    Text('ტარიფი გრძელდება. დაბრუნდი მწვანე ზონაში მგზავრობის დასასრულებლად.',
+                        style: TextStyle(color: Colors.white, fontSize: 12, height: 1.3)),
+                  ])),
+                ]),
+              ),
+            ),
           ]),
         ),
 
@@ -1654,14 +1703,17 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
                 child: ElevatedButton.icon(
                     icon: _ending
                         ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : const Icon(Icons.stop_circle, color: Colors.white, size: 22),
+                        : Icon(_inZone ? Icons.stop_circle : Icons.lock, color: Colors.white, size: 22),
                     label: Text(
-                        _ending ? 'მუშავდება...' : 'მგზავრობის დასრულება',
+                        _ending
+                            ? 'მუშავდება...'
+                            : (_inZone ? 'მგზავრობის დასრულება' : 'დაბრუნდი მწვანე ზონაში'),
                         style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
                     style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red[600],
+                        backgroundColor: _inZone ? Colors.red[600] : Colors.grey[600],
+                        disabledBackgroundColor: Colors.grey[600],
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-                    onPressed: _ending ? null : _endRide),
+                    onPressed: (_ending || !_inZone) ? null : _endRide),
               ),
             ),
             const SizedBox(height: 8),
