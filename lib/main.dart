@@ -1227,8 +1227,8 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
 
       // ── redirect (3DS) — fallback recurrent ──
       if (data['redirect_url'] != null && data['redirect_url'].toString().isNotEmpty && mounted) {
-        final ok = await Navigator.push<bool>(context, _route(BogWebViewScreen(
-            url: data['redirect_url'], title: 'გადახდა')));
+        final ok = await Navigator.push<bool>(context, MaterialPageRoute<bool>(builder: (_) =>
+            BogWebViewScreen(url: data['redirect_url'] as String, title: 'გადახდა')));
         if (ok != true) { setState(() => _starting = false); return; }
       }
 
