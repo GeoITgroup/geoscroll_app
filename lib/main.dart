@@ -14,7 +14,14 @@ import 'dart:convert';
 import 'dart:async';
 
 const String BASE_URL    = 'https://velocar.ge';
-const String APP_VERSION = '1.0.9';
+const String APP_VERSION = '1.1.0';
+
+// ─── დროის პაკეტის ფორმატი: 180წთ → "3 საათი", 30წთ → "30 წუთი" ───
+String fmtPackageDuration(int minutes) {
+  if (minutes % 1440 == 0) return '${minutes ~/ 1440} დღე';
+  if (minutes % 60 == 0)   return '${minutes ~/ 60} საათი';
+  return '$minutes წუთი';
+}
 
 const kGreen      = Color(0xFF2E9E6B);
 const kGreenLight = Color(0xFF4CAF80);
@@ -928,6 +935,29 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
   double get _perKmRate => double.tryParse(_scooter?['per_km_rate']?.toString() ?? '') ?? 0;
   String get _vehicleType => _scooter?['vehicle_type']?.toString() ?? 'scooter';
 
+  // Phase 2D: billing_mode + rate_unit + time_packages
+  String get _billingMode => _scooter?['billing_mode']?.toString() ?? 'metered';
+  String get _rateUnit => _scooter?['rate_unit']?.toString() ?? 'minute';
+  String get _currency => _scooter?['currency']?.toString() ?? 'GEL';
+  bool get _isPackage => _billingMode == 'package';
+
+  // time_packages JSON parse → [{minutes, price, label}]
+  List<Map<String, dynamic>> get _packages {
+    final raw = _scooter?['time_packages'];
+    if (raw == null) return [];
+    try {
+      final parsed = raw is String ? jsonDecode(raw) : raw;
+      if (parsed is List) {
+        return parsed.map<Map<String, dynamic>>((e) => {
+          'minutes': int.tryParse(e['minutes'].toString()) ?? 0,
+          'price': double.tryParse(e['price'].toString()) ?? 0,
+          'label': e['label']?.toString() ?? fmtPackageDuration(int.tryParse(e['minutes'].toString()) ?? 0),
+        }).where((p) => p['minutes'] > 0).toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
   Future<bool> _showTariffSheet() async {
     final battery = int.tryParse(_scooter?['battery']?.toString() ?? '100') ?? 100;
     final perMin = _perMinuteRate;
@@ -1068,6 +1098,193 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
             color: highlightFree ? kGreen : kDark)),
       ]);
 
+  // ═══ PACKAGE (მანქანა) — დროის პაკეტის არჩევა ═══
+  Future<int?> _showPackageSheet() async {
+    final packages = _packages;
+    final typeName = kTypeNames[_vehicleType] ?? _vehicleType;
+    final typeIcon = kTypeIcons[_vehicleType] ?? '🚗';
+    int? selected = packages.isNotEmpty ? packages.first['minutes'] as int : null;
+
+    return showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: Colors.white,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setSheet) => Padding(
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(width: 40, height: 4,
+                decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 18),
+            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Text(typeIcon, style: const TextStyle(fontSize: 22)),
+              const SizedBox(width: 8),
+              Text('$typeName — დროის არჩევა',
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kDark)),
+            ]),
+            const SizedBox(height: 6),
+            Text('აირჩიე გაქირავების ხანგრძლივობა', style: TextStyle(color: Colors.grey[600], fontSize: 13)),
+            const SizedBox(height: 18),
+
+            // პაკეტების ბადე
+            ...packages.map((p) {
+              final mins = p['minutes'] as int;
+              final price = p['price'] as double;
+              final label = p['label'] as String;
+              final isSel = selected == mins;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: () => setSheet(() => selected = mins),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                        color: isSel ? kGreen.withOpacity(0.08) : kBg,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: isSel ? kGreen : Colors.transparent, width: 2)),
+                    child: Row(children: [
+                      Icon(isSel ? Icons.radio_button_checked : Icons.radio_button_off,
+                          color: isSel ? kGreen : Colors.grey[400], size: 22),
+                      const SizedBox(width: 14),
+                      Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: kDark)),
+                      const Spacer(),
+                      Text('₾${price.toStringAsFixed(2)}',
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kGreen)),
+                    ]),
+                  ),
+                ),
+              );
+            }),
+            const SizedBox(height: 8),
+
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(color: Colors.blue.withOpacity(0.05), borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                const Icon(Icons.info_outline, color: Colors.blue, size: 16),
+                const SizedBox(width: 8),
+                Expanded(child: Text('გადახდა ბარათით. დროის ამოწურვისას მოწყობილობა ჩაიკეტება — წინასწარ შეგიძლია გაახანგრძლივო.',
+                    style: TextStyle(color: Colors.blue[700], fontSize: 12, height: 1.3))),
+              ]),
+            ),
+            const SizedBox(height: 18),
+
+            SizedBox(width: double.infinity, height: 54,
+                child: ElevatedButton.icon(
+                    icon: const Icon(Icons.payment, color: Colors.white),
+                    label: const Text('გადახდა და გაქირავება',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                    style: ElevatedButton.styleFrom(backgroundColor: kGreen,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+                    onPressed: selected == null ? null : () => Navigator.pop(ctx, selected))),
+            const SizedBox(height: 8),
+            TextButton(onPressed: () => Navigator.pop(ctx, null),
+                child: const Text('გაუქმება', style: TextStyle(color: Colors.grey, fontSize: 14))),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  // ═══ PACKAGE — buy-time → ActiveRideScreen (countdown) ═══
+  Future<void> _buyTimeRide(int minutes) async {
+    setState(() => _starting = true);
+    try {
+      final h = await _authHeaders();
+      final res = await http.post(
+        Uri.parse('$BASE_URL/api/trips/buy-time'),
+        headers: h,
+        body: jsonEncode({'device_id': widget.deviceId, 'minutes': minutes,
+            'latitude': null, 'longitude': null}),
+      );
+      final data = jsonDecode(res.body);
+
+      if (data['error'] == 'no_card') { setState(() => _starting = false); _promptAddCard(); return; }
+      if (data['error'] == 'company_blocked') { setState(() => _starting = false); _blockedDialog(data['message']); return; }
+      if (data['error'] == 'low_battery') {
+        setState(() => _starting = false);
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(backgroundColor: Colors.red[700], content: Text(data['message'] ?? 'ბატარეა დაბალია')));
+        return;
+      }
+      if (data['error'] == 'charge_failed') {
+        setState(() => _starting = false);
+        if (mounted) showDialog(context: context, builder: (_) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Row(children: [Icon(Icons.credit_card_off, color: Colors.red), SizedBox(width: 8), Flexible(child: Text('გადახდა ვერ შესრულდა'))]),
+            content: const Text('ბარათით გადახდა ვერ მოხერხდა. შეამოწმე ბარათი ან დაამატე ახალი.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('კარგი')),
+              ElevatedButton(
+                  onPressed: () { Navigator.pop(context); Navigator.push(context, _route(const CardScreen())); },
+                  style: ElevatedButton.styleFrom(backgroundColor: kGreen),
+                  child: const Text('ბარათი', style: TextStyle(color: Colors.white))),
+            ]));
+        return;
+      }
+
+      // ── redirect (3DS) — fallback recurrent ──
+      if (data['redirect_url'] != null && data['redirect_url'].toString().isNotEmpty && mounted) {
+        final ok = await Navigator.push<bool>(context, _route(BogWebViewScreen(
+            url: data['redirect_url'], title: 'გადახდა')));
+        if (ok != true) { setState(() => _starting = false); return; }
+      }
+
+      if ((data['success'] == true) && data['trip_id'] != null && mounted) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setInt('active_trip_id', data['trip_id'] as int);
+        await prefs.setString('active_device_id', widget.deviceId);
+        final expiresAt = data['expires_at']?.toString();
+        Navigator.pushAndRemoveUntil(context,
+            _route(ActiveRideScreen(
+              tripId: data['trip_id'] as int,
+              deviceId: widget.deviceId,
+              vehicleType: _vehicleType,
+              billingMode: 'package',
+              timePurchasedMinutes: minutes,
+              expiresAtIso: expiresAt,
+            )),
+            (_) => false);
+        return;
+      }
+
+      setState(() => _starting = false);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(data['message']?.toString() ?? 'გაქირავება ვერ დაიწყო'),
+          backgroundColor: Colors.red[700]));
+    } catch (e) {
+      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('შეცდომა: $e'))); setState(() => _starting = false); }
+    }
+  }
+
+  void _promptAddCard() {
+    if (!mounted) return;
+    showDialog(context: context, builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(children: [Icon(Icons.credit_card, color: kOrange), SizedBox(width: 8), Flexible(child: Text('ბარათი საჭიროა'))]),
+        content: const Text('გაქირავებამდე დაამატე საბანკო ბარათი.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('გაუქმება')),
+          ElevatedButton(
+              onPressed: () { Navigator.pop(context); Navigator.push(context, _route(const CardScreen())); },
+              style: ElevatedButton.styleFrom(backgroundColor: kGreen),
+              child: const Text('ბარათის დამატება', style: TextStyle(color: Colors.white))),
+        ]));
+  }
+
+  void _blockedDialog(dynamic msg) {
+    if (!mounted) return;
+    showDialog(context: context, builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(children: [Icon(Icons.block, color: Colors.red), SizedBox(width: 8), Flexible(child: Text('მიუწვდომელია'))]),
+        content: Text(msg?.toString() ?? 'მოწყობილობა დროებით მიუწვდომელია. სცადე სხვა.'),
+        actions: [ElevatedButton(onPressed: () => Navigator.pop(context),
+            style: ElevatedButton.styleFrom(backgroundColor: kDark),
+            child: const Text('გასაგებია', style: TextStyle(color: Colors.white)))]));
+  }
+
   Future<void> _startRide() async {
     final battery = int.tryParse(_scooter?['battery']?.toString() ?? '100') ?? 100;
 
@@ -1096,11 +1313,19 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
       return;
     }
 
-    // 3. ტარიფის confirmation
+    // 3. package (მანქანა) → დროის picker → buy-time
+    if (_isPackage) {
+      final mins = await _showPackageSheet();
+      if (mins == null) return;
+      await _buyTimeRide(mins);
+      return;
+    }
+
+    // 4. metered → ტარიფის confirmation
     final confirmed = await _showTariffSheet();
     if (!confirmed) return;
 
-    // 4. Wallet flow — trip start პირდაპირ
+    // 5. metered trip start (ფული არ იჭრება — accrue, ბოლოს end-ში)
     setState(()=>_starting=true);
     try {
       final h = await _authHeaders();
@@ -1111,23 +1336,10 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
       );
       final data = jsonDecode(res.body);
 
-      // ── insufficient_balance ──
-      if (data['error'] == 'insufficient_balance') {
+      // ── no_card → ბარათის დამატება ──
+      if (data['error'] == 'no_card') {
         setState(()=>_starting=false);
-        final balance  = (data['balance']  as num?)?.toDouble() ?? 0;
-        final required = (data['required'] as num?)?.toDouble() ?? 0;
-        if (mounted) showDialog(context: context, builder: (_) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: const Row(children: [Icon(Icons.account_balance_wallet_outlined, color: kOrange), SizedBox(width: 8), Flexible(child: Text('ბალანსი ცოტაა'))]),
-            content: Text('მიმდინარე ბალანსი: ₾${balance.toStringAsFixed(2)}\nსაჭიროა მინიმუმ: ₾${required.toStringAsFixed(2)}\n\nშეავსე საფულე.'),
-            actions: [
-              TextButton(onPressed: ()=>Navigator.pop(context), child: const Text('გაუქმება')),
-              ElevatedButton(
-                onPressed: () { Navigator.pop(context); Navigator.push(context, _route(const WalletScreen())); },
-                style: ElevatedButton.styleFrom(backgroundColor: kGreen),
-                child: const Text('საფულის შევსება', style: TextStyle(color: Colors.white)),
-              ),
-            ]));
+        _promptAddCard();
         return;
       }
 
@@ -1171,10 +1383,11 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
             _route(ActiveRideScreen(
               tripId: data['trip_id'] as int,
               deviceId: widget.deviceId,
-              perMinuteRate: (data['per_minute_rate'] as num?)?.toDouble() ?? _perMinuteRate,
+              perMinuteRate: (data['per_unit_rate'] as num?)?.toDouble() ?? (data['per_minute_rate'] as num?)?.toDouble() ?? _perMinuteRate,
               unlockFee:     (data['unlock_fee']      as num?)?.toDouble() ?? _unlockFee,
               perKmRate:     (data['per_km_rate']     as num?)?.toDouble() ?? _perKmRate,
               vehicleType:   (data['vehicle_type']    as String?) ?? _vehicleType,
+              billingMode:   'metered',
             )),
             (_)=>false);
         return;
@@ -1222,19 +1435,25 @@ class _ScooterDetailScreenState extends State<ScooterDetailScreen> {
                 _iRow(Icons.business,              'კომპანია', _scooter!['company_name']??'—'),
                 _iRow(Icons.battery_charging_full, 'ბატარეა',  '${_scooter!['battery']??0}%'),
                 _iRow(Icons.location_on,           'ზონა',     _scooter!['zone_name']??'—'),
-                _iRow(Icons.access_time,           'წუთის ფასი', '₾${_perMinuteRate.toStringAsFixed(2)} / წთ'),
-                if (_unlockFee > 0)
-                  _iRow(Icons.lock_open, 'გახსნა', '₾${_unlockFee.toStringAsFixed(2)}'),
-                if (_perKmRate > 0)
-                  _iRow(Icons.route, 'კმ', '₾${_perKmRate.toStringAsFixed(2)} / კმ'),
+                if (_isPackage)
+                  _iRow(Icons.schedule, 'ფასი', _packages.isNotEmpty
+                      ? 'დან ₾${_packages.first['price'].toStringAsFixed(2)}'
+                      : 'დროის პაკეტი')
+                else ...[
+                  _iRow(Icons.access_time, 'წუთის ფასი', '₾${_perMinuteRate.toStringAsFixed(2)} / წთ'),
+                  if (_unlockFee > 0)
+                    _iRow(Icons.lock_open, 'გახსნა', '₾${_unlockFee.toStringAsFixed(2)}'),
+                  if (_perKmRate > 0)
+                    _iRow(Icons.route, 'კმ', '₾${_perKmRate.toStringAsFixed(2)} / კმ'),
+                ],
               ])),
           const SizedBox(height: 20),
           if (ok) SizedBox(width: double.infinity, height: 56,
               child: ElevatedButton.icon(
                   icon: _starting
                       ? const SizedBox(width:20,height:20,child:CircularProgressIndicator(color:Colors.white,strokeWidth:2))
-                      : const Icon(Icons.payment, color: Colors.white),
-                  label: Text(_starting ? 'მუშავდება...' : 'ბალანსით გადახდა',
+                      : Icon(_isPackage ? Icons.schedule : Icons.payment, color: Colors.white),
+                  label: Text(_starting ? 'მუშავდება...' : (_isPackage ? 'დროის არჩევა და გაქირავება' : 'ბარათით გაქირავება'),
                       style: const TextStyle(fontSize:16, fontWeight:FontWeight.bold, color:Colors.white)),
                   style: ElevatedButton.styleFrom(backgroundColor: kGreen,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
@@ -1264,6 +1483,9 @@ class ActiveRideScreen extends StatefulWidget {
   final double unlockFee;
   final double perKmRate;
   final String vehicleType;
+  final String billingMode;            // 'metered' | 'package'
+  final int timePurchasedMinutes;      // package: შეძენილი წუთები
+  final String? expiresAtIso;          // package: ISO timestamp
   const ActiveRideScreen({
     super.key,
     required this.tripId,
@@ -1272,6 +1494,9 @@ class ActiveRideScreen extends StatefulWidget {
     this.unlockFee = 0,
     this.perKmRate = 0,
     this.vehicleType = 'scooter',
+    this.billingMode = 'metered',
+    this.timePurchasedMinutes = 0,
+    this.expiresAtIso,
   });
   @override State<ActiveRideScreen> createState() => _ActiveRideScreenState();
 }
@@ -1296,6 +1521,13 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   double _perKmRate = 0;
   String _vehicleType = 'scooter';
 
+  // Phase 2D: package mode
+  bool _isPackage = false;
+  DateTime? _expiresAt;
+  int _remainingSec = 0;       // package: დარჩენილი წამები
+  bool _extending = false;
+  bool _expired = false;
+
   @override
   void initState() {
     super.initState();
@@ -1303,12 +1535,152 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
     _unlockFee = widget.unlockFee;
     _perKmRate = widget.perKmRate;
     _vehicleType = widget.vehicleType;
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) => setState(() => _seconds++));
+    _isPackage = widget.billingMode == 'package';
+
+    if (_isPackage) {
+      if (widget.expiresAtIso != null) {
+        _expiresAt = DateTime.tryParse(widget.expiresAtIso!)?.toUtc();
+      }
+      if (_expiresAt == null && widget.timePurchasedMinutes > 0) {
+        _expiresAt = DateTime.now().toUtc().add(Duration(minutes: widget.timePurchasedMinutes));
+      }
+      _recomputeRemaining();
+      _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tickCountdown());
+    } else {
+      _timer = Timer.periodic(const Duration(seconds: 1), (_) => setState(() => _seconds++));
+    }
     _locationTimer = Timer.periodic(const Duration(seconds: 5), (_) => _updateLocation());
-    _syncPricing();    // server-დან აქტუალური ფასები (splash-დან resume-ის შემთხვევაში)
+    _syncPricing();    // server-დან აქტუალური ფასები / expires_at (resume)
     _loadGeofences();
     _updateLocation();
   }
+
+  void _recomputeRemaining() {
+    if (_expiresAt == null) { _remainingSec = 0; return; }
+    final diff = _expiresAt!.difference(DateTime.now().toUtc()).inSeconds;
+    _remainingSec = diff > 0 ? diff : 0;
+  }
+
+  void _tickCountdown() {
+    if (!mounted) return;
+    _recomputeRemaining();
+    if (_remainingSec <= 0 && !_expired) {
+      _expired = true;
+      _timer?.cancel();
+      _onTimeExpired();
+    }
+    setState(() {});
+  }
+
+  // დრო ამოიწურა → მოწყობილობა ჩაიკეტა (server-ზე auto-lock cron-მაც დახურა)
+  Future<void> _onTimeExpired() async {
+    _locationTimer?.cancel();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('active_trip_id');
+    await prefs.remove('active_device_id');
+    if (!mounted) return;
+    showDialog(context: context, barrierDismissible: false, builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(children: [Icon(Icons.lock_clock, color: kOrange), SizedBox(width: 8), Flexible(child: Text('დრო ამოიწურა'))]),
+        content: const Text('თქვენი დაქირავების დრო დასრულდა და მოწყობილობა ჩაიკეტა.\nგმადლობთ რომ ისარგებლეთ Velocar-ით!'),
+        actions: [ElevatedButton(
+            onPressed: () => Navigator.pushAndRemoveUntil(context, _route(const MainScreen()), (_) => false),
+            style: ElevatedButton.styleFrom(backgroundColor: kGreen),
+            child: const Text('დახურვა', style: TextStyle(color: Colors.white)))]));
+  }
+
+  String get _countdownStr {
+    final h = _remainingSec ~/ 3600;
+    final m = (_remainingSec % 3600) ~/ 60;
+    final s = _remainingSec % 60;
+    if (h > 0) return '${h.toString().padLeft(2,'0')}:${m.toString().padLeft(2,'0')}:${s.toString().padLeft(2,'0')}';
+    return '${m.toString().padLeft(2,'0')}:${s.toString().padLeft(2,'0')}';
+  }
+
+  // ── დროის გახანგრძლივება ──
+  Future<void> _extendTime() async {
+    final pkgMins = await _showExtendSheet();
+    if (pkgMins == null) return;
+    setState(() => _extending = true);
+    try {
+      final h = await _authHeaders();
+      final res = await http.post(Uri.parse('$BASE_URL/api/trips/extend'),
+          headers: h, body: jsonEncode({'trip_id': widget.tripId, 'minutes': pkgMins}));
+      final data = jsonDecode(res.body);
+      if (data['error'] == 'charge_failed') {
+        setState(() => _extending = false);
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(backgroundColor: Colors.red[700], content: const Text('გადახდა ვერ შესრულდა')));
+        return;
+      }
+      if (data['success'] == true && data['expires_at'] != null) {
+        _expiresAt = DateTime.tryParse(data['expires_at'].toString())?.toUtc();
+        _expired = false;
+        _recomputeRemaining();
+        if (_timer == null || !_timer!.isActive) {
+          _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tickCountdown());
+        }
+        setState(() => _extending = false);
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(backgroundColor: kGreen, content: Text('დაემატა ${fmtPackageDuration(pkgMins)}')));
+        return;
+      }
+      setState(() => _extending = false);
+    } catch (e) {
+      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('შეცდომა: $e'))); setState(() => _extending = false); }
+    }
+  }
+
+  Future<int?> _showExtendSheet() async {
+    // ფასები /api/scooters-დან (time_packages) — sync-ის დროს ჩამოვტვირთეთ
+    final packages = _extendPackages;
+    if (packages.isEmpty) {
+      // fallback — ფიქსირებული საათობრივი
+      return showModalBottomSheet<int>(context: context, backgroundColor: Colors.white,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+        builder: (ctx) => SafeArea(child: Padding(padding: const EdgeInsets.all(20), child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('დროის დამატება', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: kDark)),
+          const SizedBox(height: 16),
+          ...[180, 360, 1440].map((m) => Padding(padding: const EdgeInsets.only(bottom: 8),
+            child: SizedBox(width: double.infinity, child: OutlinedButton(
+              onPressed: () => Navigator.pop(ctx, m),
+              child: Text('+ ${fmtPackageDuration(m)}', style: const TextStyle(color: kDark, fontSize: 15)))))),
+        ])))); 
+    }
+    int? selected = packages.first['minutes'] as int;
+    return showModalBottomSheet<int>(context: context, backgroundColor: Colors.white, isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => StatefulBuilder(builder: (c, setS) => SafeArea(child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 24), child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 16),
+          const Text('დროის გახანგრძლივება', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: kDark)),
+          const SizedBox(height: 16),
+          ...packages.map((p) {
+            final mins = p['minutes'] as int; final price = p['price'] as double; final label = p['label'] as String;
+            final isSel = selected == mins;
+            return Padding(padding: const EdgeInsets.only(bottom: 10), child: InkWell(
+              borderRadius: BorderRadius.circular(14), onTap: () => setS(() => selected = mins),
+              child: Container(padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(color: isSel ? kGreen.withOpacity(0.08) : kBg, borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: isSel ? kGreen : Colors.transparent, width: 2)),
+                child: Row(children: [
+                  Icon(isSel ? Icons.radio_button_checked : Icons.radio_button_off, color: isSel ? kGreen : Colors.grey[400], size: 22),
+                  const SizedBox(width: 14),
+                  Text('+ $label', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: kDark)),
+                  const Spacer(),
+                  Text('₾${price.toStringAsFixed(2)}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kGreen)),
+                ]))));
+          }),
+          const SizedBox(height: 8),
+          SizedBox(width: double.infinity, height: 52, child: ElevatedButton(
+            onPressed: selected == null ? null : () => Navigator.pop(ctx, selected),
+            style: ElevatedButton.styleFrom(backgroundColor: kGreen, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+            child: const Text('გადახდა და დამატება', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)))),
+        ])))));
+  }
+
+  List<Map<String, dynamic>> _extendPackages = [];
 
   @override
   void dispose() {
@@ -1321,19 +1693,30 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
   Future<void> _syncPricing() async {
     try {
       final h = await _authHeaders();
-      // 1. trip active-ი — start_time-ის მისაღებად (timer-ის სწორად resume)
+      // 1. trip active — start_time / expires_at / billing_mode
       try {
         final tRes = await http.get(Uri.parse('$BASE_URL/api/trips/active'), headers: h);
         final td = jsonDecode(tRes.body);
-        if (td is Map && td['active'] == true && td['start_time'] != null) {
-          final startTime = DateTime.parse(td['start_time'].toString()).toUtc();
-          final elapsedSec = DateTime.now().toUtc().difference(startTime).inSeconds;
-          if (elapsedSec > 0 && mounted) {
-            setState(() => _seconds = elapsedSec);
+        if (td is Map && td['active'] == true) {
+          final bm = td['billing_mode']?.toString() ?? 'metered';
+          if (bm == 'package') {
+            _isPackage = true;
+            if (td['expires_at'] != null) {
+              _expiresAt = DateTime.tryParse(td['expires_at'].toString())?.toUtc();
+              _expired = false;
+              _recomputeRemaining();
+              if (_timer == null || !_timer!.isActive) {
+                _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tickCountdown());
+              }
+            }
+          } else if (td['start_time'] != null) {
+            final startTime = DateTime.parse(td['start_time'].toString()).toUtc();
+            final elapsedSec = DateTime.now().toUtc().difference(startTime).inSeconds;
+            if (elapsedSec > 0 && mounted) setState(() => _seconds = elapsedSec);
           }
         }
       } catch (_) {}
-      // 2. pricing — სქროლის აქტუალური ფასები
+      // 2. pricing — აქტუალური ფასები + extend packages
       final res = await http.get(Uri.parse('$BASE_URL/api/scooters'), headers: h);
       final d = jsonDecode(res.body);
       if (d is List) {
@@ -1344,6 +1727,20 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
             _unlockFee = double.tryParse(s['unlock_fee']?.toString() ?? '') ?? _unlockFee;
             _perKmRate = double.tryParse(s['per_km_rate']?.toString() ?? '') ?? _perKmRate;
             _vehicleType = s['vehicle_type']?.toString() ?? _vehicleType;
+            // extend packages
+            final raw = s['time_packages'];
+            if (raw != null) {
+              try {
+                final parsed = raw is String ? jsonDecode(raw) : raw;
+                if (parsed is List) {
+                  _extendPackages = parsed.map<Map<String, dynamic>>((e) => {
+                    'minutes': int.tryParse(e['minutes'].toString()) ?? 0,
+                    'price': double.tryParse(e['price'].toString()) ?? 0,
+                    'label': e['label']?.toString() ?? fmtPackageDuration(int.tryParse(e['minutes'].toString()) ?? 0),
+                  }).where((p) => p['minutes'] > 0).toList();
+                }
+              } catch (_) {}
+            }
           });
         }
       }
@@ -1712,36 +2109,61 @@ class _ActiveRideScreenState extends State<ActiveRideScreen> {
           color: kDark,
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
           child: Column(children: [
-            Row(children: [
-              _statCard('დრო', _timeStr, 'წთ:წმ', Icons.access_time),
-              const SizedBox(width: 8),
-              _statCard('მანძილი', _distanceKm.toStringAsFixed(2), 'კმ', Icons.route),
-              const SizedBox(width: 8),
-              _statCard('ღირებულება', '₾${_cost.toStringAsFixed(2)}', '${_perMinuteRate.toStringAsFixed(2)}/წთ', Icons.attach_money, green: true),
-            ]),
-            const SizedBox(height: 12),
-            SafeArea(
-              top: false,
-              child: SizedBox(
-                width: double.infinity,
-                height: 54,
+            if (_isPackage) ...[
+              // package — countdown + მანძილი
+              Row(children: [
+                _statCard('დარჩა', _countdownStr, _remainingSec < 120 ? 'მალე იკეტება' : 'სთ:წთ:წმ',
+                    Icons.hourglass_bottom, green: _remainingSec >= 120),
+                const SizedBox(width: 8),
+                _statCard('მანძილი', _distanceKm.toStringAsFixed(2), 'კმ', Icons.route),
+                const SizedBox(width: 8),
+                _statCard('სტატუსი', _remainingSec > 0 ? 'აქტიური' : 'ამოიწურა', '', Icons.directions_car,
+                    green: _remainingSec > 0),
+              ]),
+              if (_remainingSec < 120 && _remainingSec > 0)
+                Padding(padding: const EdgeInsets.only(top: 10),
+                  child: Container(width: double.infinity, padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: kOrange.withOpacity(0.15), borderRadius: BorderRadius.circular(10)),
+                    child: const Row(children: [Icon(Icons.warning_amber, color: kOrange, size: 18), SizedBox(width: 8),
+                      Expanded(child: Text('დრო იწურება — გაახანგრძლივე რომ არ ჩაიკეტოს',
+                          style: TextStyle(color: Colors.white, fontSize: 12)))]))),
+              const SizedBox(height: 12),
+              SafeArea(top: false, child: SizedBox(width: double.infinity, height: 54,
+                child: ElevatedButton.icon(
+                  icon: _extending
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Icon(Icons.add_circle_outline, color: Colors.white, size: 22),
+                  label: Text(_extending ? 'მუშავდება...' : 'დროის გახანგრძლივება',
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
+                  style: ElevatedButton.styleFrom(backgroundColor: kGreen,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+                  onPressed: _extending ? null : _extendTime))),
+              const SizedBox(height: 8),
+            ] else ...[
+              // metered — timer + cost + end ღილაკი
+              Row(children: [
+                _statCard('დრო', _timeStr, 'წთ:წმ', Icons.access_time),
+                const SizedBox(width: 8),
+                _statCard('მანძილი', _distanceKm.toStringAsFixed(2), 'კმ', Icons.route),
+                const SizedBox(width: 8),
+                _statCard('ღირებულება', '₾${_cost.toStringAsFixed(2)}', '${_perMinuteRate.toStringAsFixed(2)}/წთ', Icons.attach_money, green: true),
+              ]),
+              const SizedBox(height: 12),
+              SafeArea(top: false, child: SizedBox(width: double.infinity, height: 54,
                 child: ElevatedButton.icon(
                     icon: _ending
                         ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                         : Icon(_inZone ? Icons.stop_circle : Icons.lock, color: Colors.white, size: 22),
                     label: Text(
-                        _ending
-                            ? 'მუშავდება...'
-                            : (_inZone ? 'მგზავრობის დასრულება' : 'დაბრუნდი მწვანე ზონაში'),
+                        _ending ? 'მუშავდება...' : (_inZone ? 'მგზავრობის დასრულება' : 'დაბრუნდი მწვანე ზონაში'),
                         style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
                     style: ElevatedButton.styleFrom(
                         backgroundColor: _inZone ? Colors.red[600] : Colors.grey[600],
                         disabledBackgroundColor: Colors.grey[600],
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-                    onPressed: (_ending || !_inZone) ? null : _endRide),
-              ),
-            ),
-            const SizedBox(height: 8),
+                    onPressed: (_ending || !_inZone) ? null : _endRide))),
+              const SizedBox(height: 8),
+            ],
           ]),
         ),
       ]),
